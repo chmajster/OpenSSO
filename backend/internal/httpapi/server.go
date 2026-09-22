@@ -50,6 +50,10 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/applications",s.require("applications.read",s.listApplications))
 	m.HandleFunc("POST /api/v1/applications",s.require("applications.write",s.createApplication))
 	m.HandleFunc("GET /api/v1/audit",s.require("audit.read",s.listAudit))
+	m.HandleFunc("GET /api/v1/roles",s.require("users.read",s.listRoles))
+	m.HandleFunc("GET /api/v1/users/{id}/roles",s.require("users.read",s.listUserRoles))
+	m.HandleFunc("POST /api/v1/users/{id}/roles",s.require("rbac.write",s.assignRole))
+	m.HandleFunc("DELETE /api/v1/users/{id}/roles/{roleId}",s.require("rbac.write",s.removeRole))
 	return s.middleware(m)
 }
 
