@@ -40,7 +40,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions(role_id,permission_id)
 SELECT r.id,p.id
 FROM roles r JOIN permissions p ON p.name IN (
-  'applications.read','applications.write'
+  'applications.read','applications.write','users.read','groups.read'
 )
 WHERE r.name='Application Administrator'
 ON CONFLICT DO NOTHING;
