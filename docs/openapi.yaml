@@ -431,6 +431,12 @@ paths:
       tags: [Audit]
       summary: Read recent authentication and administrative audit events
       security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: user_id, in: query, required: false, schema: { type: string, format: uuid }, description: Match actor or user target }
+        - { name: application_id, in: query, required: false, schema: { type: string, format: uuid }, description: Match application target }
+        - { name: event, in: query, required: false, schema: { type: string } }
+        - { name: ip, in: query, required: false, schema: { type: string } }
+        - { name: result, in: query, required: false, schema: { type: string, enum: [success, failure] } }
       responses:
         "200": { description: Audit events }
 
