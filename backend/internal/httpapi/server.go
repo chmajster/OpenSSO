@@ -24,7 +24,7 @@ type Server struct {
 	redis *redis.Client
 	log *slog.Logger
 }
-type principal struct{ UserID, Username string }
+type principal struct{ UserID, Username string; MustChangePassword bool }
 type contextKey string
 const principalKey contextKey = "principal"
 const requestIDKey contextKey = "request_id"
@@ -42,8 +42,15 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/login",s.login)
 	m.HandleFunc("POST /api/v1/auth/logout",s.withPrincipal(s.logout))
 	m.HandleFunc("GET /api/v1/me",s.withPrincipal(s.me))
+	m.HandleFunc("POST /api/v1/me/password",s.withPrincipal(s.changeOwnPassword))
+	m.HandleFunc("GET /api/v1/dashboard",s.require("users.read",s.dashboard))
 	m.HandleFunc("GET /api/v1/users",s.require("users.read",s.listUsers))
 	m.HandleFunc("POST /api/v1/users",s.require("users.write",s.createUser))
+	m.HandleFunc("GET /api/v1/users/{id}",s.require("users.read",s.getUser))
+	m.HandleFunc("PATCH /api/v1/users/{id}",s.require("users.write",s.updateUser))
+	m.HandleFunc("POST /api/v1/users/{id}/unlock",s.require("users.write",s.unlockUser))
+	m.HandleFunc("POST /api/v1/users/{id}/reset-password",s.require("users.write",s.resetUserPassword))
+	m.HandleFunc("POST /api/v1/users/{id}/sessions/revoke-all",s.require("sessions.write",s.revokeUserSessions))
 	m.HandleFunc("GET /api/v1/groups",s.require("groups.read",s.listGroups))
 	m.HandleFunc("POST /api/v1/groups",s.require("groups.write",s.createGroup))
 	m.HandleFunc("POST /api/v1/groups/{id}/members",s.require("groups.write",s.addGroupMember))
@@ -54,6 +61,10 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/users/{id}/roles",s.require("users.read",s.listUserRoles))
 	m.HandleFunc("POST /api/v1/users/{id}/roles",s.require("rbac.write",s.assignRole))
 	m.HandleFunc("DELETE /api/v1/users/{id}/roles/{roleId}",s.require("rbac.write",s.removeRole))
+	m.HandleFunc("GET /api/v1/sessions",s.require("sessions.read",s.listSessions))
+	m.HandleFunc("DELETE /api/v1/sessions/{id}",s.require("sessions.write",s.revokeSession))
+	m.HandleFunc("GET /api/v1/security/policy",s.require("policies.read",s.securityPolicy))
+	m.HandleFunc("PUT /api/v1/security/policy",s.require("policies.write",s.updateSecurityPolicy))
 	return s.middleware(m)
 }
 
@@ -102,16 +113,17 @@ func (s *Server) bootstrap(w http.ResponseWriter,r *http.Request){
 }
 func (s *Server) login(w http.ResponseWriter,r *http.Request){
 	ip:=clientIP(r);if !s.allowLogin(r.Context(),ip){problem(w,429,"too many login attempts");return}
+	policy,policyErr:=s.getSecurityPolicy(r);if policyErr!=nil{problem(w,500,"database error");return}
 	var in struct{Username string `json:"username"`;Password string `json:"password"`}
 	if decodeJSON(w,r,&in)!=nil{return}
 	var uid,username,hash string;var active bool;var locked *time.Time
 	e:=s.db.QueryRow(r.Context(),"SELECT u.id,u.username,u.active,u.locked_until,p.password_hash FROM users u JOIN password_credentials p ON p.user_id=u.id WHERE lower(u.username)=lower($1) OR lower(u.email)=lower($1)",strings.TrimSpace(in.Username)).Scan(&uid,&username,&active,&locked,&hash)
 	valid:=e==nil&&active&&(locked==nil||locked.Before(time.Now()))&&security.VerifyPassword(hash,in.Password)
 	if !valid{
-		if e==nil{_,_=s.db.Exec(r.Context(),"UPDATE users SET failed_logins=failed_logins+1,locked_until=CASE WHEN failed_logins+1>=10 THEN now()+interval '15 minutes' ELSE locked_until END WHERE id=$1",uid)}
+		if e==nil{_,_=s.db.Exec(r.Context(),"UPDATE users SET failed_logins=failed_logins+1,locked_until=CASE WHEN failed_logins+1 >= $2 THEN now()+make_interval(mins => $3) ELSE locked_until END WHERE id=$1",uid,policy.LockoutThreshold,policy.LockoutMinutes)}
 		_=s.audit(r.Context(),nil,"LOGIN_FAILED","user",uid,"failure",r);problem(w,401,"invalid credentials");return
 	}
-	token,e:=security.RandomToken(32);if e!=nil{problem(w,500,"entropy failure");return};expires:=time.Now().Add(s.cfg.SessionTTL)
+	token,e:=security.RandomToken(32);if e!=nil{problem(w,500,"entropy failure");return};expires:=time.Now().Add(time.Duration(policy.SessionTTLMinutes)*time.Minute)
 	if _,e=s.db.Exec(r.Context(),"INSERT INTO sessions(user_id,token_hash,ip,user_agent,expires_at) VALUES($1,$2,$3,$4,$5)",uid,security.SHA256String(token),nullableIP(ip),truncate(r.UserAgent(),512),expires);e!=nil{problem(w,500,"database error");return}
 	_,_=s.db.Exec(r.Context(),"UPDATE users SET failed_logins=0,locked_until=NULL WHERE id=$1",uid);_=s.audit(r.Context(),&uid,"LOGIN_SUCCESS","user",uid,"success",r)
 	http.SetCookie(w,&http.Cookie{Name:"opensso_session",Value:token,Path:"/",HttpOnly:true,Secure:s.cfg.CookieSecure,SameSite:http.SameSiteLaxMode,Expires:expires})
@@ -127,7 +139,7 @@ func (s *Server) withPrincipal(next http.HandlerFunc)http.HandlerFunc{
 	return func(w http.ResponseWriter,r *http.Request){
 		c,e:=r.Cookie("opensso_session");if e!=nil{problem(w,401,"authentication required");return}
 		var p principal
-		e=s.db.QueryRow(r.Context(),"SELECT u.id,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active=true",security.SHA256String(c.Value)).Scan(&p.UserID,&p.Username)
+		e=s.db.QueryRow(r.Context(),"SELECT u.id,u.username,u.must_change_password FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active=true",security.SHA256String(c.Value)).Scan(&p.UserID,&p.Username,&p.MustChangePassword)
 		if e!=nil{problem(w,401,"authentication required");return}
 		_,_=s.db.Exec(r.Context(),"UPDATE sessions SET last_seen_at=now() WHERE token_hash=$1",security.SHA256String(c.Value))
 		next(w,r.WithContext(context.WithValue(r.Context(),principalKey,p)))
@@ -135,7 +147,7 @@ func (s *Server) withPrincipal(next http.HandlerFunc)http.HandlerFunc{
 }
 func (s *Server) require(permission string,next http.HandlerFunc)http.HandlerFunc{
 	return s.withPrincipal(func(w http.ResponseWriter,r *http.Request){
-		p:=r.Context().Value(principalKey).(principal);var ok bool
+		p:=r.Context().Value(principalKey).(principal);if p.MustChangePassword{problem(w,403,"password change required");return};var ok bool
 		e:=s.db.QueryRow(r.Context(),"SELECT EXISTS(SELECT 1 FROM role_assignments ra JOIN role_permissions rp ON rp.role_id=ra.role_id JOIN permissions p ON p.id=rp.permission_id WHERE ra.user_id=$1 AND p.name=$2)",p.UserID,permission).Scan(&ok)
 		if e!=nil||!ok{problem(w,403,"permission denied");return};next(w,r)
 	})
@@ -146,9 +158,9 @@ func (s *Server) listUsers(w http.ResponseWriter,r *http.Request){
 }
 func (s *Server) createUser(w http.ResponseWriter,r *http.Request){
 	var in struct{Username string `json:"username"`;Email string `json:"email"`;DisplayName string `json:"display_name"`;Password string `json:"password"`}
-	if decodeJSON(w,r,&in)!=nil{return};hash,e:=security.HashPassword(in.Password);if e!=nil{problem(w,400,e.Error());return}
+	if decodeJSON(w,r,&in)!=nil{return};policy,e:=s.getSecurityPolicy(r);if e!=nil{problem(w,500,"database error");return};if len(in.Password)<policy.PasswordMinLength{problem(w,400,"password does not meet current minimum length");return};hash,e:=security.HashPassword(in.Password);if e!=nil{problem(w,400,e.Error());return}
 	tx,e:=s.db.Begin(r.Context());if e!=nil{problem(w,500,"database error");return};defer tx.Rollback(r.Context());var id string
-	if e=tx.QueryRow(r.Context(),"INSERT INTO users(username,email,display_name) VALUES(lower($1),lower($2),$3) RETURNING id",strings.TrimSpace(in.Username),strings.TrimSpace(in.Email),strings.TrimSpace(in.DisplayName)).Scan(&id);e!=nil{problem(w,409,"username or email already exists");return}
+	if e=tx.QueryRow(r.Context(),"INSERT INTO users(username,email,display_name,must_change_password) VALUES(lower($1),lower($2),$3,true) RETURNING id",strings.TrimSpace(in.Username),strings.TrimSpace(in.Email),strings.TrimSpace(in.DisplayName)).Scan(&id);e!=nil{problem(w,409,"username or email already exists");return}
 	if _,e=tx.Exec(r.Context(),"INSERT INTO password_credentials(user_id,password_hash) VALUES($1,$2)",id,hash);e!=nil{problem(w,500,"database error");return}
 	p:=r.Context().Value(principalKey).(principal);if e=s.auditTx(r.Context(),tx,&p.UserID,"USER_CREATED","user",id,"success",r);e!=nil{problem(w,500,"audit error");return};if e=tx.Commit(r.Context());e!=nil{problem(w,500,"database error");return};writeJSON(w,201,map[string]string{"id":id})
 }
