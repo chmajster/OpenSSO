@@ -172,7 +172,7 @@ function Bootstrap({onDone}:{onDone:()=>Promise<void>}){
       await onDone();
     }catch(x){setError((x as Error).message)}finally{setBusy(false)}
   };
-  return <Centered><section className="card auth"><h1>Initialize OpenSSO</h1><p>Create the first Super Admin. The bootstrap token is accepted only before initialization.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit}><Field name="token" label="Bootstrap token" type="password"/><Field name="username" label="Username"/><Field name="email" label="Email" type="email"/><Field name="display_name" label="Display name"/><Field name="password" label="Password" type="password" minLength={12}/><button disabled={busy}>{busy?"Creating…":"Create installation"}</button></form></section></Centered>
+  return <Centered><section className="card auth"><h1>Initialize OpenSSO</h1><p>Create the first Super Admin. The bootstrap token is accepted only before initialization.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit}><Field name="token" label="Bootstrap token" type="password"/><Field name="username" label="Username"/><Field name="email" label="Email" type="email"/><Field name="display_name" label="Display name"/><Field name="password" label="Password (upper/lower/digit/symbol)" type="password" minLength={12}/><button disabled={busy}>{busy?"Creating…":"Create installation"}</button></form></section></Centered>
 }
 
 function Login({onDone}:{onDone:()=>Promise<void>}){
@@ -218,7 +218,12 @@ function SecurityPolicy({data,loading,onSaved}:{data:Item;loading:boolean;onSave
     e.preventDefault();setBusy(true);setError("");const f=new FormData(e.currentTarget);
     try{
       await api("/api/v1/security/policy",{method:"PUT",body:JSON.stringify({
-        password_min_length:Number(f.get("password_min_length")),lockout_threshold:Number(f.get("lockout_threshold")),
+        password_min_length:Number(f.get("password_min_length")),
+        password_require_upper:f.get("password_require_upper")==="on",
+        password_require_lower:f.get("password_require_lower")==="on",
+        password_require_digit:f.get("password_require_digit")==="on",
+        password_require_symbol:f.get("password_require_symbol")==="on",
+        lockout_threshold:Number(f.get("lockout_threshold")),
         lockout_minutes:Number(f.get("lockout_minutes")),session_ttl_minutes:Number(f.get("session_ttl_minutes"))
       })});
       onSaved();
@@ -226,6 +231,10 @@ function SecurityPolicy({data,loading,onSaved}:{data:Item;loading:boolean;onSave
   };
   return <section className="card"><h2>Authentication policy</h2>{error&&<ErrorBox text={error}/>}<form onSubmit={submit} className="inlineForm">
     <NumberField name="password_min_length" label="Minimum password length" value={Number(data.password_min_length??12)} min={12} max={128}/>
+    <CheckField name="password_require_upper" label="Require uppercase letter" checked={Boolean(data.password_require_upper)}/>
+    <CheckField name="password_require_lower" label="Require lowercase letter" checked={Boolean(data.password_require_lower)}/>
+    <CheckField name="password_require_digit" label="Require digit" checked={Boolean(data.password_require_digit)}/>
+    <CheckField name="password_require_symbol" label="Require symbol" checked={Boolean(data.password_require_symbol)}/>
     <NumberField name="lockout_threshold" label="Failed attempts before lockout" value={Number(data.lockout_threshold??10)} min={3} max={100}/>
     <NumberField name="lockout_minutes" label="Lockout minutes" value={Number(data.lockout_minutes??15)} min={1} max={1440}/>
     <NumberField name="session_ttl_minutes" label="Session TTL minutes" value={Number(data.session_ttl_minutes??720)} min={5} max={10080}/>
@@ -398,7 +407,7 @@ function CreateForm({view,onCreated}:{view:View;onCreated:()=>void}){
   return <section className="card create"><h2>{view==="roles"?"Assign role":`Create ${view.slice(0,-1)}`}</h2>{error&&<ErrorBox text={error}/>}
     {secret&&<div className="secret"><strong>Client secret — copy now</strong><code>{secret}</code><span>It will not be shown again.</span></div>}
     <form onSubmit={submit} className="inlineForm">
-      {view==="users"&&<><Field name="username" label="Username"/><Field name="email" label="Email" type="email"/><Field name="display_name" label="Display name"/><Field name="password" label="Temporary password" type="password" minLength={12}/></>}
+      {view==="users"&&<><Field name="username" label="Username"/><Field name="email" label="Email" type="email"/><Field name="display_name" label="Display name"/><Field name="password" label="Temporary password (must meet policy)" type="password" minLength={12}/></>}
       {view==="groups"&&<><Field name="name" label="Name"/><Field name="description" label="Description"/></>}
       {view==="roles"&&<><Field name="user_id" label="User ID"/><Field name="role_id" label="Role ID"/></>}
       {view==="applications"&&<><Field name="name" label="Application name"/><Field name="redirect_uri" label="Exact redirect URI"/><Field name="post_logout_redirect_uri" label="Post-logout redirect URI" required={false}/><Field name="initiate_login_uri" label="Launch / initiate-login URI" required={false}/><Field name="allowed_scopes" label="Allowed scopes" defaultValue="openid profile email groups"/><label className="check"><input name="public_client" type="checkbox"/> Public client</label></>}
@@ -409,6 +418,7 @@ function CreateForm({view,onCreated}:{view:View;onCreated:()=>void}){
 
 function Field({name,label,type="text",minLength,required=true,defaultValue}:{name:string;label:string;type?:string;minLength?:number;required?:boolean;defaultValue?:string}){return <label><span>{label}</span><input required={required} name={name} type={type} minLength={minLength} defaultValue={defaultValue}/></label>}
 function NumberField({name,label,value,min,max}:{name:string;label:string;value:number;min:number;max:number}){return <label><span>{label}</span><input required name={name} type="number" defaultValue={value} min={min} max={max}/></label>}
+function CheckField({name,label,checked}:{name:string;label:string;checked:boolean}){return <label className="check policyCheck"><input name={name} type="checkbox" defaultChecked={checked}/><span>{label}</span></label>}
 function ErrorBox({text}:{text:string}){return <div className="error" role="alert">{text}</div>}
 function Centered({children}:{children:React.ReactNode}){return <div className="centered">{children}</div>}
 function render(v:unknown){if(Array.isArray(v))return v.join(", ");if(typeof v==="boolean")return v?"Yes":"No";if(v==null||v==="")return "—";return String(v)}
