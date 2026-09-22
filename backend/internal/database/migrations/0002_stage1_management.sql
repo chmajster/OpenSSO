@@ -1,5 +1,3 @@
-BEGIN;
-
 ALTER TABLE users
   ADD COLUMN must_change_password boolean NOT NULL DEFAULT false;
 
@@ -31,5 +29,3 @@ SELECT r.id,p.id
 FROM roles r JOIN permissions p ON p.name IN ('sessions.read','policies.read')
 WHERE r.name='Read Only Administrator'
 ON CONFLICT DO NOTHING;
-
-COMMIT;
