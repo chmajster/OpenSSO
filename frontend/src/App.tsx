@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Item = Record<string, unknown>;
-type View = "dashboard" | "users" | "groups" | "applications" | "audit";
+type View = "dashboard" | "users" | "groups" | "roles" | "applications" | "audit";
 
 async function api(path:string, init:RequestInit={}) {
   const r=await fetch(path,{credentials:"include",headers:{"Content-Type":"application/json",...(init.headers||{})},...init});
@@ -25,7 +25,7 @@ export default function App(){
   };
   useEffect(()=>{refreshSession().catch(e=>setError(e.message));},[]);
 
-  const endpoint=useMemo(()=>({users:"/api/v1/users",groups:"/api/v1/groups",applications:"/api/v1/applications",audit:"/api/v1/audit",dashboard:""}[view]),[view]);
+  const endpoint=useMemo(()=>({users:"/api/v1/users",groups:"/api/v1/groups",roles:"/api/v1/roles",applications:"/api/v1/applications",audit:"/api/v1/audit",dashboard:""}[view]),[view]);
   useEffect(()=>{if(!me||!endpoint){setItems([]);return}setLoading(true);setError("");api(endpoint).then(x=>setItems(x.items||[])).catch(e=>setError(e.message)).finally(()=>setLoading(false));},[me,endpoint]);
 
   if(initialized===null)return <Centered><p>Checking OpenSSO status…</p>{error&&<ErrorBox text={error}/>}</Centered>;
@@ -38,7 +38,7 @@ export default function App(){
       <div className="brand">OpenSSO</div>
       <div className="identity">{String(me.username)}</div>
       <nav>
-        {(["dashboard","users","groups","applications","audit"] as View[]).map(v=><button key={v} className={view===v?"active":""} onClick={()=>setView(v)}>{label(v)}</button>)}
+        {(["dashboard","users","groups","roles","applications","audit"] as View[]).map(v=><button key={v} className={view===v?"active":""} onClick={()=>setView(v)}>{label(v)}</button>)}
       </nav>
       <button className="secondary logout" onClick={()=>void logout()}>Sign out</button>
     </aside>
@@ -73,12 +73,14 @@ function CreateForm({view,onCreated}:{view:View;onCreated:()=>void}){
   const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setError("");const f=new FormData(e.currentTarget);try{
     if(view==="users")await api("/api/v1/users",{method:"POST",body:JSON.stringify({username:f.get("username"),email:f.get("email"),display_name:f.get("display_name"),password:f.get("password")})});
     if(view==="groups")await api("/api/v1/groups",{method:"POST",body:JSON.stringify({name:f.get("name"),description:f.get("description")})});
+    if(view==="roles")await api(`/api/v1/users/${f.get("user_id")}/roles`,{method:"POST",body:JSON.stringify({role_id:f.get("role_id")})});
     if(view==="applications")await api("/api/v1/applications",{method:"POST",body:JSON.stringify({name:f.get("name"),public_client:f.get("public_client")==="on",redirect_uris:[f.get("redirect_uri")]})});
     e.currentTarget.reset();onCreated();
   }catch(x){setError((x as Error).message)}finally{setBusy(false)}};
   return <section className="card create"><h2>Create {view.slice(0,-1)}</h2>{error&&<ErrorBox text={error}/>}<form onSubmit={submit} className="inlineForm">
     {view==="users"&&<><Field name="username" label="Username"/><Field name="email" label="Email" type="email"/><Field name="display_name" label="Display name"/><Field name="password" label="Initial password" type="password" minLength={12}/></>}
     {view==="groups"&&<><Field name="name" label="Name"/><Field name="description" label="Description"/></>}
+    {view==="roles"&&<><Field name="user_id" label="User ID"/><Field name="role_id" label="Role ID"/></>}
     {view==="applications"&&<><Field name="name" label="Application name"/><Field name="redirect_uri" label="Exact redirect URI"/><label className="check"><input name="public_client" type="checkbox"/> Public client</label></>}
     <button disabled={busy}>{busy?"Saving…":"Create"}</button>
   </form></section>
@@ -87,6 +89,6 @@ function Field({name,label,type="text",minLength}:{name:string;label:string;type
 function ErrorBox({text}:{text:string}){return <div className="error" role="alert">{text}</div>}
 function Centered({children}:{children:React.ReactNode}){return <div className="centered">{children}</div>}
 function render(v:unknown){if(typeof v==="boolean")return v?"Yes":"No";if(v==null)return "—";return String(v)}
-function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",applications:"Applications",audit:"Audit log"})[v]}
-function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",applications:"Registered relying parties",audit:"Security and administrative events"})[v]}
-function columns(v:View){return ({users:["username","email","display_name","active","created_at"],groups:["name","description","created_at"],applications:["name","client_id","public_client","require_pkce","created_at"],audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"]})[v]||[]}
+function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",audit:"Audit log"})[v]}
+function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"Registered relying parties",audit:"Security and administrative events"})[v]}
+function columns(v:View){return ({users:["username","email","display_name","active","created_at"],groups:["name","description","created_at"],roles:["id","name","description"],applications:["name","client_id","public_client","require_pkce","created_at"],audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"]})[v]||[]}
