@@ -57,6 +57,7 @@ jobs:
       OPENSSO_BOOTSTRAP_TOKEN: 0123456789abcdefghijklmnopqrstuvwxyz
       OPENSSO_PUBLIC_URL: http://127.0.0.1:8080
       OPENSSO_COOKIE_SECURE: "false"
+      OPENSSO_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
     steps:
       - uses: actions/checkout@v4
       - run: docker compose up -d --build
