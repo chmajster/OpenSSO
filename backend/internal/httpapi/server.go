@@ -110,6 +110,10 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.cfg.TrustProxyHeaders {
+			r.Header.Del("X-Forwarded-For")
+			r.Header.Del("X-Real-IP")
+		}
 		rid, _ := security.RandomToken(12)
 		w.Header().Set("X-Request-ID", rid)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -664,6 +668,15 @@ func problem(w http.ResponseWriter, status int, detail string) {
 	writeJSON(w, status, map[string]any{"error": http.StatusText(status), "detail": detail})
 }
 func clientIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		candidate := strings.TrimSpace(strings.Split(forwarded, ",")[0])
+		if net.ParseIP(candidate) != nil {
+			return candidate
+		}
+	}
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(realIP) != nil {
+		return realIP
+	}
 	h, _, e := net.SplitHostPort(r.RemoteAddr)
 	if e == nil {
 		return h
