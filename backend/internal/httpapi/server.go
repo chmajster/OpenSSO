@@ -96,7 +96,7 @@ func (s *Server) middleware(next http.Handler)http.Handler{
 			expected,err:=url.Parse(s.cfg.PublicURL);if err!=nil||expected.Host==""{problem(w,500,"invalid public URL configuration");return}
 			if !strings.EqualFold(r.Host,expected.Host){problem(w,400,"invalid host");return}
 		}
-		if r.Method!="GET"&&r.Method!="HEAD"&&r.Method!="OPTIONS"&&r.URL.Path!="/api/v1/auth/login"&&r.URL.Path!="/api/v1/setup/bootstrap"{
+		if strings.HasPrefix(r.URL.Path,"/api/v1/")&&r.Method!="GET"&&r.Method!="HEAD"&&r.Method!="OPTIONS"&&r.URL.Path!="/api/v1/auth/login"&&r.URL.Path!="/api/v1/setup/bootstrap"{
 			cookie,err:=r.Cookie("opensso_csrf");header:=r.Header.Get("X-CSRF-Token")
 			if err!=nil||header==""||subtle.ConstantTimeCompare([]byte(cookie.Value),[]byte(header))!=1{problem(w,403,"CSRF validation failed");return}
 		}
