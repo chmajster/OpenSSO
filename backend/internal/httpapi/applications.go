@@ -11,11 +11,12 @@ func (s *Server) applicationIntegration(w http.ResponseWriter, r *http.Request) 
 	var name, clientID string
 	var public bool
 	var scopes []string
+	var initiateLoginURI *string
 	err := s.db.QueryRow(r.Context(), `
-		SELECT a.name,c.client_id,c.public_client,c.allowed_scopes
+		SELECT a.name,c.client_id,c.public_client,c.allowed_scopes,c.initiate_login_uri
 		FROM applications a JOIN oauth_clients c ON c.application_id=a.id
 		WHERE a.id=$1
-	`, id).Scan(&name, &clientID, &public, &scopes)
+	`, id).Scan(&name, &clientID, &public, &scopes, &initiateLoginURI)
 	if err != nil {
 		problem(w, 404, "application not found")
 		return
@@ -41,6 +42,7 @@ func (s *Server) applicationIntegration(w http.ResponseWriter, r *http.Request) 
 		"client_id":                 clientID,
 		"public_client":             public,
 		"client_secret_retrievable": false,
+		"initiate_login_uri":        initiateLoginURI,
 		"scopes":                    scopes,
 		"redirect_uris":             redirects,
 		"post_logout_redirect_uris": logoutRedirects,
