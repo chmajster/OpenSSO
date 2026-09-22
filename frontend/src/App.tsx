@@ -4,8 +4,20 @@ type Item = Record<string, unknown>;
 type View = "dashboard" | "users" | "groups" | "roles" | "applications" | "sessions" | "security" | "audit";
 type Me = { UserID?: string; Username?: string; MustChangePassword?: boolean; user_id?: string; username?: string; must_change_password?: boolean };
 
+function cookie(name:string){
+  const prefix=name+"=";
+  const value=document.cookie.split("; ").find(x=>x.startsWith(prefix));
+  return value?decodeURIComponent(value.slice(prefix.length)):"";
+}
+
 async function api(path:string, init:RequestInit={}) {
-  const r=await fetch(path,{credentials:"include",headers:{"Content-Type":"application/json",...(init.headers||{})},...init});
+  const method=(init.method||"GET").toUpperCase();
+  const headers:Record<string,string>={"Content-Type":"application/json",...(init.headers as Record<string,string>||{})};
+  if(!["GET","HEAD","OPTIONS"].includes(method)){
+    const csrf=cookie("opensso_csrf");
+    if(csrf)headers["X-CSRF-Token"]=csrf;
+  }
+  const r=await fetch(path,{credentials:"include",...init,headers});
   if(r.status===204)return null;
   const body=await r.json().catch(()=>({detail:"Invalid server response"}));
   if(!r.ok)throw new Error(body.detail||body.error||`HTTP ${r.status}`);
