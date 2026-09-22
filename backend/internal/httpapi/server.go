@@ -464,7 +464,7 @@ func (s *Server) addGroupMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
-	rows, e := s.db.Query(r.Context(), "SELECT a.id,a.name,a.protocol,a.enabled,c.client_id,c.public_client,c.require_pkce,c.allowed_scopes,a.created_at FROM applications a JOIN oauth_clients c ON c.application_id=a.id ORDER BY a.name LIMIT 500")
+	rows, e := s.db.Query(r.Context(), "SELECT a.id,a.name,a.protocol,a.enabled,c.client_id,c.public_client,c.require_pkce,c.allowed_scopes,c.initiate_login_uri,a.created_at FROM applications a JOIN oauth_clients c ON c.application_id=a.id ORDER BY a.name LIMIT 500")
 	if e != nil {
 		problem(w, 500, "database error")
 		return
@@ -475,12 +475,13 @@ func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
 		var id, n, p, cid string
 		var enabled, pub, pkce bool
 		var scopes []string
+		var initiateLoginURI *string
 		var created time.Time
-		if rows.Scan(&id, &n, &p, &enabled, &cid, &pub, &pkce, &scopes, &created) != nil {
+		if rows.Scan(&id, &n, &p, &enabled, &cid, &pub, &pkce, &scopes, &initiateLoginURI, &created) != nil {
 			problem(w, 500, "database error")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": n, "protocol": p, "enabled": enabled, "client_id": cid, "public_client": pub, "require_pkce": pkce, "allowed_scopes": scopes, "created_at": created})
+		items = append(items, map[string]any{"id": id, "name": n, "protocol": p, "enabled": enabled, "client_id": cid, "public_client": pub, "require_pkce": pkce, "allowed_scopes": scopes, "initiate_login_uri": initiateLoginURI, "created_at": created})
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
 }
@@ -491,6 +492,7 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 		RedirectURIs           []string `json:"redirect_uris"`
 		PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris"`
 		AllowedScopes          []string `json:"allowed_scopes"`
+		InitiateLoginURI       string   `json:"initiate_login_uri"`
 	}
 	if decodeJSON(w, r, &in) != nil {
 		return
@@ -503,6 +505,13 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 		u, e := url.Parse(raw)
 		if e != nil || u.Scheme == "" || u.Host == "" || u.Fragment != "" || strings.Contains(raw, "*") {
 			problem(w, 400, "invalid redirect URI")
+			return
+		}
+	}
+	if in.InitiateLoginURI != "" {
+		u, err := url.Parse(in.InitiateLoginURI)
+		if err != nil || u.Scheme == "" || u.Host == "" || u.Fragment != "" || strings.Contains(in.InitiateLoginURI, "*") {
+			problem(w, 400, "invalid initiate_login_uri")
 			return
 		}
 	}
@@ -540,7 +549,7 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "application already exists")
 		return
 	}
-	if _, e = tx.Exec(r.Context(), "INSERT INTO oauth_clients(application_id,client_id,client_secret_hash,public_client,require_pkce,allowed_scopes) VALUES($1,$2,NULLIF($3,''),$4,true,$5)", id, clientID, secretHash, in.PublicClient, scopes); e != nil {
+	if _, e = tx.Exec(r.Context(), "INSERT INTO oauth_clients(application_id,client_id,client_secret_hash,public_client,require_pkce,allowed_scopes,initiate_login_uri) VALUES($1,$2,NULLIF($3,''),$4,true,$5,NULLIF($6,''))", id, clientID, secretHash, in.PublicClient, scopes, strings.TrimSpace(in.InitiateLoginURI)); e != nil {
 		problem(w, 500, "database error")
 		return
 	}
@@ -565,7 +574,7 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "database error")
 		return
 	}
-	writeJSON(w, 201, map[string]any{"id": id, "client_id": clientID, "client_secret": secret, "allowed_scopes": scopes})
+	writeJSON(w, 201, map[string]any{"id": id, "client_id": clientID, "client_secret": secret, "allowed_scopes": scopes, "initiate_login_uri": strings.TrimSpace(in.InitiateLoginURI)})
 }
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	rows, e := s.db.Query(r.Context(), "SELECT id,occurred_at,COALESCE(actor_user_id::text,''),target_type,target_id,event,result,COALESCE(ip::text,''),request_id FROM audit_events ORDER BY occurred_at DESC LIMIT 500")
