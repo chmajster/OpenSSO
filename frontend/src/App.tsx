@@ -52,7 +52,6 @@ const adminResourceEndpoints: Partial<Record<View,string>> = {
   roles:"/api/v1/roles",
   applications:"/api/v1/applications",
   sessions:"/api/v1/sessions",
-  audit:"/api/v1/audit",
 };
 
 function hasPermission(access:Access|null, permission:string){
@@ -142,6 +141,7 @@ export default function App(){
       {view==="dashboard"?<Dashboard data={dashboard} loading={loading}/>:
        view==="security"?<SecurityPolicy data={policy} loading={loading} onSaved={reload}/>:
        view==="profile"?<ProfileView data={profile} loading={loading} onSaved={reload}/>:
+       view==="audit"?<AuditView/>:
        view==="my-apps"?<MyApplications items={items} loading={loading}/>:
        view==="my-sessions"?<MySessions items={items} loading={loading} reload={reload}/>:
        <ResourceView view={view} items={items} loading={loading} reload={reload}/>}
@@ -294,6 +294,39 @@ function MySessions({items,loading,reload}:{items:Item[];loading:boolean;reload:
     {["ip","user_agent","created_at","last_seen_at","expires_at"].map(c=><td key={c}>{render(x[c])}</td>)}
     <td><button className="danger" onClick={()=>window.confirm("Revoke this session?")&&void api(`/api/v1/me/sessions/${x.id}`,{method:"DELETE"}).then(reload)}>Revoke</button></td>
   </tr>)}</tbody></table>}</section>;
+}
+
+function AuditView(){
+  const [items,setItems]=useState<Item[]>([]);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState("");
+  const [filters,setFilters]=useState({user_id:"",application_id:"",event:"",ip:"",result:""});
+
+  const load=async(next=filters)=>{
+    setLoading(true);setError("");
+    try{
+      const q=new URLSearchParams();
+      Object.entries(next).forEach(([k,v])=>{if(v.trim())q.set(k,v.trim())});
+      const data=await api(`/api/v1/audit?${q.toString()}`);
+      setItems(data.items||[]);
+    }catch(e){setError((e as Error).message)}finally{setLoading(false)}
+  };
+  useEffect(()=>{void load()},[]);
+
+  const submit=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();void load()};
+  const clear=()=>{const empty={user_id:"",application_id:"",event:"",ip:"",result:""};setFilters(empty);void load(empty)};
+
+  return <>
+    <section className="card create"><h2>Audit filters</h2>{error&&<ErrorBox text={error}/>}<form className="inlineForm" onSubmit={submit}>
+      <label><span>User ID</span><input value={filters.user_id} onChange={e=>setFilters({...filters,user_id:e.target.value})}/></label>
+      <label><span>Application ID</span><input value={filters.application_id} onChange={e=>setFilters({...filters,application_id:e.target.value})}/></label>
+      <label><span>Event</span><input value={filters.event} onChange={e=>setFilters({...filters,event:e.target.value})}/></label>
+      <label><span>IP</span><input value={filters.ip} onChange={e=>setFilters({...filters,ip:e.target.value})}/></label>
+      <label><span>Result</span><select value={filters.result} onChange={e=>setFilters({...filters,result:e.target.value})}><option value="">Any</option><option value="success">success</option><option value="failure">failure</option></select></label>
+      <div className="actions"><button disabled={loading}>Apply</button><button type="button" className="secondary" onClick={clear}>Clear</button></div>
+    </form></section>
+    <section className="card tableCard">{loading?<p>Loading…</p>:items.length===0?<p>No audit events match the filters.</p>:<table><thead><tr>{columns("audit").map(x=><th key={x}>{x}</th>)}<th>request_id</th></tr></thead><tbody>{items.map(x=><tr key={String(x.id)}>{columns("audit").map(k=><td key={k}>{render(x[k])}</td>)}<td>{render(x.request_id)}</td></tr>)}</tbody></table>}</section>
+  </>;
 }
 
 function ResourceView({view,items,loading,reload}:{view:View;items:Item[];loading:boolean;reload:()=>void}){
