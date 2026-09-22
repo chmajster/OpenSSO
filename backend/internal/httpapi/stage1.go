@@ -330,3 +330,17 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		"failed_logins_24h": failed24h,
 	})
 }
+
+func (s *Server) revokeAllSessions(w http.ResponseWriter, r *http.Request) {
+	tag, err := s.db.Exec(r.Context(), `
+		UPDATE sessions SET revoked_at=now()
+		WHERE revoked_at IS NULL AND expires_at>now()
+	`)
+	if err != nil {
+		problem(w, 500, "database error")
+		return
+	}
+	p := r.Context().Value(principalKey).(principal)
+	_ = s.audit(r.Context(), &p.UserID, "SESSION_REVOKED", "global", "", "success", r)
+	writeJSON(w, 200, map[string]any{"revoked_sessions": tag.RowsAffected()})
+}
