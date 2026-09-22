@@ -596,9 +596,10 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 		query += fmt.Sprintf(" AND "+condition, len(args))
 	}
 	q := r.URL.Query()
-	add("(COALESCE(actor_user_id::text,'')=$%d OR (target_type='user' AND target_id=$%d))", q.Get("user_id"))
-	if q.Get("user_id") != "" {
-		query = strings.Replace(query, fmt.Sprintf("$%d)", len(args)), fmt.Sprintf("$%d)", len(args)), 1)
+	if userID := q.Get("user_id"); userID != "" {
+		args = append(args, userID)
+		n := len(args)
+		query += fmt.Sprintf(" AND (COALESCE(actor_user_id::text,'')=$%d OR (target_type='user' AND target_id=$%d))", n, n)
 	}
 	add("(target_type='application' AND target_id=$%d)", q.Get("application_id"))
 	add("event=$%d", q.Get("event"))
