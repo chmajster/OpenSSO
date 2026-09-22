@@ -1,0 +1,61 @@
+services:
+  opensso:
+    build: ./frontend
+    ports:
+      - "${OPENSSO_PORT:-8080}:8080"
+    depends_on:
+      opensso-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  opensso-api:
+    build: ./backend
+    environment:
+      OPENSSO_LISTEN_ADDR: ":8080"
+      OPENSSO_PUBLIC_URL: "${OPENSSO_PUBLIC_URL:-http://localhost:8080}"
+      OPENSSO_DATABASE_URL: "postgres://opensso:${POSTGRES_PASSWORD}@postgres:5432/opensso?sslmode=disable"
+      OPENSSO_REDIS_URL: "redis://redis:6379/0"
+      OPENSSO_COOKIE_SECURE: "${OPENSSO_COOKIE_SECURE:-false}"
+      OPENSSO_BOOTSTRAP_TOKEN: "${OPENSSO_BOOTSTRAP_TOKEN}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/opensso-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: opensso
+      POSTGRES_USER: opensso
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    volumes:
+      - opensso_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opensso -d opensso"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server","--appendonly","yes"]
+    volumes:
+      - opensso_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  opensso_postgres:
+  opensso_redis:
