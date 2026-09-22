@@ -186,6 +186,15 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "invalid username or email")
 		return
 	}
+	policy, e := s.getSecurityPolicy(r)
+	if e != nil {
+		problem(w, 500, "database error")
+		return
+	}
+	if violation := passwordPolicyViolation(policy, in.Password); violation != "" {
+		problem(w, 400, violation)
+		return
+	}
 	hash, e := security.HashPassword(in.Password)
 	if e != nil {
 		problem(w, 400, e.Error())
@@ -363,8 +372,8 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "database error")
 		return
 	}
-	if len(in.Password) < policy.PasswordMinLength {
-		problem(w, 400, "password does not meet current minimum length")
+	if violation := passwordPolicyViolation(policy, in.Password); violation != "" {
+		problem(w, 400, violation)
 		return
 	}
 	hash, e := security.HashPassword(in.Password)
