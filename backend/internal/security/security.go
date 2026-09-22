@@ -16,6 +16,17 @@ import (
 const ( argonMemory=64*1024; argonIterations=3; argonParallelism=2; argonKeyLen=32 )
 
 func RandomToken(n int) (string,error) { b:=make([]byte,n); if _,e:=rand.Read(b);e!=nil{return "",e}; return base64.RawURLEncoding.EncodeToString(b),nil }
+func RandomUUID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
 func SHA256String(v string) string { h:=sha256.Sum256([]byte(v)); return base64.RawURLEncoding.EncodeToString(h[:]) }
 
 func HashPassword(password string)(string,error){
