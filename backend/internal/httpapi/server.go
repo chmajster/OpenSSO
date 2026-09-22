@@ -70,6 +70,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/groups/{id}/members",s.require("groups.write",s.addGroupMember))
 	m.HandleFunc("GET /api/v1/applications",s.require("applications.read",s.listApplications))
 	m.HandleFunc("POST /api/v1/applications",s.require("applications.write",s.createApplication))
+	m.HandleFunc("GET /api/v1/applications/{id}/integration",s.require("applications.read",s.applicationIntegration))
+	m.HandleFunc("POST /api/v1/applications/{id}/rotate-secret",s.require("applications.write",s.rotateClientSecret))
 	m.HandleFunc("GET /api/v1/audit",s.require("audit.read",s.listAudit))
 	m.HandleFunc("GET /api/v1/roles",s.require("users.read",s.listRoles))
 	m.HandleFunc("GET /api/v1/users/{id}/roles",s.require("users.read",s.listUserRoles))
@@ -208,20 +210,32 @@ func (s *Server) addGroupMember(w http.ResponseWriter,r *http.Request){
 	p:=r.Context().Value(principalKey).(principal);_=s.audit(r.Context(),&p.UserID,"GROUP_MEMBERSHIP_ADDED","group",gid,"success",r);w.WriteHeader(204)
 }
 func (s *Server) listApplications(w http.ResponseWriter,r *http.Request){
-	rows,e:=s.db.Query(r.Context(),"SELECT a.id,a.name,a.protocol,a.enabled,c.client_id,c.public_client,c.require_pkce,a.created_at FROM applications a JOIN oauth_clients c ON c.application_id=a.id ORDER BY a.name LIMIT 500");if e!=nil{problem(w,500,"database error");return};defer rows.Close();items:=[]map[string]any{}
-	for rows.Next(){var id,n,p,cid string;var enabled,pub,pkce bool;var created time.Time;if rows.Scan(&id,&n,&p,&enabled,&cid,&pub,&pkce,&created)!=nil{problem(w,500,"database error");return};items=append(items,map[string]any{"id":id,"name":n,"protocol":p,"enabled":enabled,"client_id":cid,"public_client":pub,"require_pkce":pkce,"created_at":created})};writeJSON(w,200,map[string]any{"items":items})
+	rows,e:=s.db.Query(r.Context(),"SELECT a.id,a.name,a.protocol,a.enabled,c.client_id,c.public_client,c.require_pkce,c.allowed_scopes,a.created_at FROM applications a JOIN oauth_clients c ON c.application_id=a.id ORDER BY a.name LIMIT 500");if e!=nil{problem(w,500,"database error");return};defer rows.Close();items:=[]map[string]any{}
+	for rows.Next(){var id,n,p,cid string;var enabled,pub,pkce bool;var scopes []string;var created time.Time;if rows.Scan(&id,&n,&p,&enabled,&cid,&pub,&pkce,&scopes,&created)!=nil{problem(w,500,"database error");return};items=append(items,map[string]any{"id":id,"name":n,"protocol":p,"enabled":enabled,"client_id":cid,"public_client":pub,"require_pkce":pkce,"allowed_scopes":scopes,"created_at":created})};writeJSON(w,200,map[string]any{"items":items})
 }
 func (s *Server) createApplication(w http.ResponseWriter,r *http.Request){
-	var in struct{Name string `json:"name"`;PublicClient bool `json:"public_client"`;RedirectURIs []string `json:"redirect_uris"`}
-	if decodeJSON(w,r,&in)!=nil{return};if len(in.RedirectURIs)==0{problem(w,400,"at least one redirect URI is required");return}
-	for _,raw:=range in.RedirectURIs{u,e:=url.Parse(raw);if e!=nil||u.Scheme==""||u.Host==""||u.Fragment!=""||strings.Contains(raw,"*"){problem(w,400,"invalid redirect URI");return}}
-	clientID,e:=security.RandomToken(18);if e!=nil{problem(w,500,"entropy failure");return};secret,secretHash:="","";if !in.PublicClient{secret,e=security.RandomToken(32);if e!=nil{problem(w,500,"entropy failure");return};secretHash=security.SHA256String(secret)}
+	var in struct{
+		Name string `json:"name"`
+		PublicClient bool `json:"public_client"`
+		RedirectURIs []string `json:"redirect_uris"`
+		PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris"`
+		AllowedScopes []string `json:"allowed_scopes"`
+	}
+	if decodeJSON(w,r,&in)!=nil{return}
+	if len(in.RedirectURIs)==0{problem(w,400,"at least one redirect URI is required");return}
+	for _,raw:=range append(append([]string{},in.RedirectURIs...),in.PostLogoutRedirectURIs...){u,e:=url.Parse(raw);if e!=nil||u.Scheme==""||u.Host==""||u.Fragment!=""||strings.Contains(raw,"*"){problem(w,400,"invalid redirect URI");return}}
+	if len(in.AllowedScopes)==0{in.AllowedScopes=[]string{"openid","profile","email","groups"}}
+	normalized,scopes,e:=normalizeRequestedScope(strings.Join(in.AllowedScopes," "));if e!=nil||!contains(scopes,"openid"){problem(w,400,"OIDC applications must allow the openid scope");return};_ = normalized
+	clientID,e:=security.RandomToken(18);if e!=nil{problem(w,500,"entropy failure");return}
+	secret,secretHash:="","";if !in.PublicClient{secret,e=security.RandomToken(32);if e!=nil{problem(w,500,"entropy failure");return};secretHash=security.SHA256String(secret)}
 	tx,e:=s.db.Begin(r.Context());if e!=nil{problem(w,500,"database error");return};defer tx.Rollback(r.Context());var id string
 	if e=tx.QueryRow(r.Context(),"INSERT INTO applications(name,protocol) VALUES($1,'oidc') RETURNING id",strings.TrimSpace(in.Name)).Scan(&id);e!=nil{problem(w,409,"application already exists");return}
-	if _,e=tx.Exec(r.Context(),"INSERT INTO oauth_clients(application_id,client_id,client_secret_hash,public_client,require_pkce) VALUES($1,$2,NULLIF($3,''),$4,true)",id,clientID,secretHash,in.PublicClient);e!=nil{problem(w,500,"database error");return}
+	if _,e=tx.Exec(r.Context(),"INSERT INTO oauth_clients(application_id,client_id,client_secret_hash,public_client,require_pkce,allowed_scopes) VALUES($1,$2,NULLIF($3,''),$4,true,$5)",id,clientID,secretHash,in.PublicClient,scopes);e!=nil{problem(w,500,"database error");return}
 	for _,uri:=range in.RedirectURIs{if _,e=tx.Exec(r.Context(),"INSERT INTO oauth_redirect_uris(application_id,redirect_uri) VALUES($1,$2)",id,uri);e!=nil{problem(w,500,"database error");return}}
-	p:=r.Context().Value(principalKey).(principal);if e=s.auditTx(r.Context(),tx,&p.UserID,"APPLICATION_CREATED","application",id,"success",r);e!=nil{problem(w,500,"audit error");return};if e=tx.Commit(r.Context());e!=nil{problem(w,500,"database error");return}
-	writeJSON(w,201,map[string]any{"id":id,"client_id":clientID,"client_secret":secret})
+	for _,uri:=range in.PostLogoutRedirectURIs{if _,e=tx.Exec(r.Context(),"INSERT INTO oauth_post_logout_redirect_uris(application_id,redirect_uri) VALUES($1,$2)",id,uri);e!=nil{problem(w,500,"database error");return}}
+	p:=r.Context().Value(principalKey).(principal);if e=s.auditTx(r.Context(),tx,&p.UserID,"APPLICATION_CREATED","application",id,"success",r);e!=nil{problem(w,500,"audit error");return}
+	if e=tx.Commit(r.Context());e!=nil{problem(w,500,"database error");return}
+	writeJSON(w,201,map[string]any{"id":id,"client_id":clientID,"client_secret":secret,"allowed_scopes":scopes})
 }
 func (s *Server) listAudit(w http.ResponseWriter,r *http.Request){
 	rows,e:=s.db.Query(r.Context(),"SELECT id,occurred_at,COALESCE(actor_user_id::text,''),target_type,target_id,event,result,COALESCE(ip::text,''),request_id FROM audit_events ORDER BY occurred_at DESC LIMIT 500");if e!=nil{problem(w,500,"database error");return};defer rows.Close();items:=[]map[string]any{}
