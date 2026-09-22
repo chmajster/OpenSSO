@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/chmajster/OpenSSO/backend/internal/config"
+	"github.com/chmajster/OpenSSO/backend/internal/oidc"
 	"github.com/chmajster/OpenSSO/backend/internal/security"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,14 +25,15 @@ type Server struct {
 	db *pgxpool.Pool
 	redis *redis.Client
 	log *slog.Logger
+	keys *oidc.KeyManager
 }
 type principal struct{ UserID, Username string; MustChangePassword bool }
 type contextKey string
 const principalKey contextKey = "principal"
 const requestIDKey contextKey = "request_id"
 
-func New(cfg config.Config, db *pgxpool.Pool, rdb *redis.Client, log *slog.Logger)*Server {
-	return &Server{cfg:cfg,db:db,redis:rdb,log:log}
+func New(cfg config.Config, db *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, keys *oidc.KeyManager)*Server {
+	return &Server{cfg:cfg,db:db,redis:rdb,log:log,keys:keys}
 }
 
 func (s *Server) Handler() http.Handler {
