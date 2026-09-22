@@ -1,0 +1,118 @@
+openapi: 3.1.0
+info:
+  title: OpenSSO Administrative API
+  version: 0.1.0
+  description: Administrative API implemented by the current OpenSSO foundation. Protocol endpoints are documented separately when complete.
+servers:
+  - url: /
+paths:
+  /api/v1/setup/status:
+    get:
+      summary: Read installation state
+      responses:
+        "200": { description: Installation state }
+  /api/v1/setup/bootstrap:
+    post:
+      summary: Create the first administrator
+      security: [{ bootstrapToken: [] }]
+      responses:
+        "201": { description: Installation initialized }
+        "403": { description: Invalid or disabled bootstrap }
+        "409": { description: Already initialized }
+  /api/v1/auth/login:
+    post:
+      summary: Create an administrative browser session
+      responses:
+        "200": { description: Authenticated }
+        "401": { description: Invalid credentials }
+        "429": { description: Rate limited }
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke current session
+      security: [{ sessionCookie: [] }]
+      responses:
+        "204": { description: Session revoked }
+  /api/v1/me:
+    get:
+      summary: Current principal
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Principal }
+        "401": { description: Authentication required }
+  /api/v1/users:
+    get:
+      summary: List users
+      security: [{ sessionCookie: [] }]
+      responses: { "200": { description: Users } }
+    post:
+      summary: Create local user
+      security: [{ sessionCookie: [] }]
+      responses:
+        "201": { description: User created }
+        "403": { description: Missing permission }
+  /api/v1/groups:
+    get:
+      summary: List groups
+      security: [{ sessionCookie: [] }]
+      responses: { "200": { description: Groups } }
+    post:
+      summary: Create group
+      security: [{ sessionCookie: [] }]
+      responses: { "201": { description: Group created } }
+  /api/v1/groups/{id}/members:
+    post:
+      summary: Add group member
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { "204": { description: Membership present } }
+  /api/v1/applications:
+    get:
+      summary: List registered applications
+      security: [{ sessionCookie: [] }]
+      responses: { "200": { description: Applications } }
+    post:
+      summary: Register an OIDC application configuration
+      description: Registers client metadata only. This does not imply that protocol endpoints are exposed.
+      security: [{ sessionCookie: [] }]
+      responses: { "201": { description: Application registered } }
+  /api/v1/roles:
+    get:
+      summary: List roles
+      security: [{ sessionCookie: [] }]
+      responses: { "200": { description: Roles } }
+  /api/v1/users/{id}/roles:
+    get:
+      summary: List user roles
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { "200": { description: Role assignments } }
+    post:
+      summary: Assign role to user
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { "200": { description: Role assigned } }
+  /api/v1/users/{id}/roles/{roleId}:
+    delete:
+      summary: Remove role from user
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: roleId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { "204": { description: Assignment removed } }
+  /api/v1/audit:
+    get:
+      summary: Read audit events
+      security: [{ sessionCookie: [] }]
+      responses: { "200": { description: Audit events } }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: opensso_session
+    bootstrapToken:
+      type: http
+      scheme: bearer
