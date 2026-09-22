@@ -1,5 +1,3 @@
-BEGIN;
-
 ALTER TABLE oauth_clients
   ADD COLUMN allowed_scopes text[] NOT NULL DEFAULT ARRAY['openid','profile','email','groups'],
   ADD COLUMN access_token_ttl_seconds integer NOT NULL DEFAULT 900 CHECK (access_token_ttl_seconds BETWEEN 60 AND 86400),
@@ -106,5 +104,3 @@ INSERT INTO role_permissions(role_id,permission_id)
 SELECT r.id,p.id FROM roles r JOIN permissions p ON p.name='signing_keys.read'
 WHERE r.name='Read Only Administrator'
 ON CONFLICT DO NOTHING;
-
-COMMIT;
