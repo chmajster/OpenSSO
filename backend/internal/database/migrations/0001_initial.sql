@@ -1,4 +1,3 @@
-BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE system_state (
@@ -123,4 +122,3 @@ INSERT INTO role_permissions(role_id,permission_id)
 SELECT r.id,p.id FROM roles r JOIN permissions p ON p.name IN ('users.read','groups.read','applications.read','audit.read')
 WHERE r.name='Read Only Administrator'
 ON CONFLICT DO NOTHING;
-COMMIT;
