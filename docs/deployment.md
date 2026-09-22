@@ -69,7 +69,7 @@ The reference nginx container proxies:
 
 to the Go API and serves the React SPA for other browser routes.
 
-When adding an external load balancer or reverse proxy, preserve the original Host header and ensure it matches `OPENSSO_PUBLIC_URL`.
+When adding an external load balancer or reverse proxy, preserve the original Host header and ensure it matches `OPENSSO_PUBLIC_URL`. Set `OPENSSO_TRUST_PROXY_HEADERS=true` only when the API cannot be reached directly by untrusted clients; otherwise leave it false so spoofed forwarded-IP headers are ignored.
 
 ## Horizontal scaling
 
