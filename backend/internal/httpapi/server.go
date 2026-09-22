@@ -60,7 +60,13 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
 	m.HandleFunc("POST /api/v1/auth/logout", s.withPrincipal(s.logout))
 	m.HandleFunc("GET /api/v1/me", s.withPrincipal(s.me))
+	m.HandleFunc("GET /api/v1/me/access", s.withPrincipal(s.myAccess))
+	m.HandleFunc("GET /api/v1/me/profile", s.withPrincipal(s.myProfile))
+	m.HandleFunc("PATCH /api/v1/me/profile", s.withPrincipal(s.updateMyProfile))
 	m.HandleFunc("POST /api/v1/me/password", s.withPrincipal(s.changeOwnPassword))
+	m.HandleFunc("GET /api/v1/me/applications", s.withPrincipal(s.myApplications))
+	m.HandleFunc("GET /api/v1/me/sessions", s.withPrincipal(s.mySessions))
+	m.HandleFunc("DELETE /api/v1/me/sessions/{id}", s.withPrincipal(s.revokeMySession))
 	m.HandleFunc("GET /api/v1/dashboard", s.require("users.read", s.dashboard))
 	m.HandleFunc("GET /api/v1/users", s.require("users.read", s.listUsers))
 	m.HandleFunc("POST /api/v1/users", s.require("users.write", s.createUser))
@@ -71,11 +77,22 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/users/{id}/sessions/revoke-all", s.require("sessions.write", s.revokeUserSessions))
 	m.HandleFunc("GET /api/v1/groups", s.require("groups.read", s.listGroups))
 	m.HandleFunc("POST /api/v1/groups", s.require("groups.write", s.createGroup))
+	m.HandleFunc("GET /api/v1/groups/{id}", s.require("groups.read", s.getGroup))
+	m.HandleFunc("PATCH /api/v1/groups/{id}", s.require("groups.write", s.updateGroup))
+	m.HandleFunc("DELETE /api/v1/groups/{id}", s.require("groups.write", s.deleteGroup))
+	m.HandleFunc("GET /api/v1/groups/{id}/members", s.require("groups.read", s.listGroupMembers))
 	m.HandleFunc("POST /api/v1/groups/{id}/members", s.require("groups.write", s.addGroupMember))
+	m.HandleFunc("DELETE /api/v1/groups/{id}/members/{userId}", s.require("groups.write", s.removeGroupMember))
 	m.HandleFunc("GET /api/v1/applications", s.require("applications.read", s.listApplications))
 	m.HandleFunc("POST /api/v1/applications", s.require("applications.write", s.createApplication))
 	m.HandleFunc("GET /api/v1/applications/{id}/integration", s.require("applications.read", s.applicationIntegration))
+	m.HandleFunc("PUT /api/v1/applications/{id}", s.require("applications.write", s.updateApplication))
 	m.HandleFunc("POST /api/v1/applications/{id}/rotate-secret", s.require("applications.write", s.rotateClientSecret))
+	m.HandleFunc("GET /api/v1/applications/{id}/assignments", s.require("applications.read", s.applicationAssignments))
+	m.HandleFunc("POST /api/v1/applications/{id}/assign/users", s.require("applications.write", s.assignApplicationUser))
+	m.HandleFunc("DELETE /api/v1/applications/{id}/assign/users/{userId}", s.require("applications.write", s.removeApplicationUser))
+	m.HandleFunc("POST /api/v1/applications/{id}/assign/groups", s.require("applications.write", s.assignApplicationGroup))
+	m.HandleFunc("DELETE /api/v1/applications/{id}/assign/groups/{groupId}", s.require("applications.write", s.removeApplicationGroup))
 	m.HandleFunc("GET /api/v1/audit", s.require("audit.read", s.listAudit))
 	m.HandleFunc("GET /api/v1/roles", s.require("users.read", s.listRoles))
 	m.HandleFunc("GET /api/v1/users/{id}/roles", s.require("users.read", s.listUserRoles))
@@ -83,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/v1/users/{id}/roles/{roleId}", s.require("rbac.write", s.removeRole))
 	m.HandleFunc("GET /api/v1/sessions", s.require("sessions.read", s.listSessions))
 	m.HandleFunc("DELETE /api/v1/sessions/{id}", s.require("sessions.write", s.revokeSession))
+	m.HandleFunc("POST /api/v1/sessions/revoke-all", s.require("sessions.write", s.revokeAllSessions))
 	m.HandleFunc("GET /api/v1/security/policy", s.require("policies.read", s.securityPolicy))
 	m.HandleFunc("PUT /api/v1/security/policy", s.require("policies.write", s.updateSecurityPolicy))
 	m.HandleFunc("GET /api/v1/signing-keys", s.require("signing_keys.read", s.listSigningKeys))
@@ -366,6 +384,10 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, e = tx.Exec(r.Context(), "INSERT INTO password_credentials(user_id,password_hash) VALUES($1,$2)", id, hash); e != nil {
+		problem(w, 500, "database error")
+		return
+	}
+	if _, e = tx.Exec(r.Context(), "INSERT INTO role_assignments(user_id,role_id) SELECT $1,id FROM roles WHERE name='User' ON CONFLICT DO NOTHING", id); e != nil {
 		problem(w, 500, "database error")
 		return
 	}
