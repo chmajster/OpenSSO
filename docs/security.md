@@ -75,7 +75,7 @@ Database statements are parameterized. Secrets are excluded from audit metadata 
 
 ## Audit
 
-Authentication and administrative mutations record actor, target, event, result, source IP, user agent and request ID. Passwords, bearer tokens, refresh tokens, client secrets and private signing keys are not audit fields.
+Authentication and administrative mutations record actor, target, event, result, source IP, user agent and request ID. Forwarded client IP headers are accepted only when `OPENSSO_TRUST_PROXY_HEADERS=true`; the reference nginx-only API deployment enables this explicitly. Passwords, bearer tokens, refresh tokens, client secrets and private signing keys are not audit fields.
 
 ## Threat model
 
