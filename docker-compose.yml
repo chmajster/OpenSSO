@@ -16,6 +16,7 @@ services:
       OPENSSO_DATABASE_URL: "postgres://opensso:${POSTGRES_PASSWORD}@postgres:5432/opensso?sslmode=disable"
       OPENSSO_REDIS_URL: "redis://redis:6379/0"
       OPENSSO_COOKIE_SECURE: "${OPENSSO_COOKIE_SECURE:-false}"
+      OPENSSO_TRUST_PROXY_HEADERS: "true"
       OPENSSO_BOOTSTRAP_TOKEN: "${OPENSSO_BOOTSTRAP_TOKEN}"
       OPENSSO_MASTER_KEY: "${OPENSSO_MASTER_KEY}"
     depends_on:
