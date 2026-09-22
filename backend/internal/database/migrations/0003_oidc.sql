@@ -1,7 +1,7 @@
 BEGIN;
 
 ALTER TABLE oauth_clients
-  ADD COLUMN allowed_scopes text[] NOT NULL DEFAULT ARRAY['openid','profile','email'],
+  ADD COLUMN allowed_scopes text[] NOT NULL DEFAULT ARRAY['openid','profile','email','groups'],
   ADD COLUMN access_token_ttl_seconds integer NOT NULL DEFAULT 900 CHECK (access_token_ttl_seconds BETWEEN 60 AND 86400),
   ADD COLUMN id_token_ttl_seconds integer NOT NULL DEFAULT 900 CHECK (id_token_ttl_seconds BETWEEN 60 AND 86400),
   ADD COLUMN refresh_token_ttl_seconds integer NOT NULL DEFAULT 2592000 CHECK (refresh_token_ttl_seconds BETWEEN 300 AND 31536000);
