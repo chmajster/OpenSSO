@@ -10,14 +10,14 @@ import (
 )
 
 type securityPolicy struct {
-	PasswordMinLength    int  `json:"password_min_length"`
-	PasswordRequireUpper bool `json:"password_require_upper"`
-	PasswordRequireLower bool `json:"password_require_lower"`
-	PasswordRequireDigit bool `json:"password_require_digit"`
+	PasswordMinLength     int  `json:"password_min_length"`
+	PasswordRequireUpper  bool `json:"password_require_upper"`
+	PasswordRequireLower  bool `json:"password_require_lower"`
+	PasswordRequireDigit  bool `json:"password_require_digit"`
 	PasswordRequireSymbol bool `json:"password_require_symbol"`
-	LockoutThreshold     int  `json:"lockout_threshold"`
-	LockoutMinutes       int  `json:"lockout_minutes"`
-	SessionTTLMinutes    int  `json:"session_ttl_minutes"`
+	LockoutThreshold      int  `json:"lockout_threshold"`
+	LockoutMinutes        int  `json:"lockout_minutes"`
+	SessionTTLMinutes     int  `json:"session_ttl_minutes"`
 }
 
 func (s *Server) getSecurityPolicy(r *http.Request) (securityPolicy, error) {
