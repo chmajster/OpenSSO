@@ -76,12 +76,14 @@ api_mutate POST "/api/v1/users/$USER_ID/sessions/revoke-all" >/dev/null
 POLICY="$(curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/v1/security/policy")"
 python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["password_min_length"] >= 12; assert d["lockout_threshold"] >= 3' <<<"$POLICY"
 
-curl -fsS "$BASE_URL/.well-known/openid-configuration" |
-  python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["issuer"]; assert d["authorization_endpoint"].endswith("/oauth2/authorize"); assert "S256" in d["code_challenge_methods_supported"]'
-curl -fsS "$BASE_URL/.well-known/oauth-authorization-server" |
-  python3 -c 'import json,sys; d=json.load(sys.stdin); assert "authorization_code" in d["grant_types_supported"]'
-curl -fsS "$BASE_URL/.well-known/jwks.json" |
-  python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["keys"]) >= 1; assert d["keys"][0]["alg"]=="RS256"; assert d["keys"][0]["kty"]=="RSA"'
+DISCOVERY_JSON="$(curl -fsS "$BASE_URL/.well-known/openid-configuration")"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["issuer"]; assert d["authorization_endpoint"].endswith("/oauth2/authorize"); assert "S256" in d["code_challenge_methods_supported"]' "$DISCOVERY_JSON"
+
+OAUTH_METADATA_JSON="$(curl -fsS "$BASE_URL/.well-known/oauth-authorization-server")"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert "authorization_code" in d["grant_types_supported"]' "$OAUTH_METADATA_JSON"
+
+JWKS_JSON="$(curl -fsS "$BASE_URL/.well-known/jwks.json")"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert len(d["keys"]) >= 1; assert d["keys"][0]["alg"]=="RS256"; assert d["keys"][0]["kty"]=="RSA"' "$JWKS_JSON"
 
 VERIFIER='dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'
 CHALLENGE='E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM'
