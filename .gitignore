@@ -1,0 +1,8 @@
+.env
+*.log
+.DS_Store
+backend/opensso
+backend/healthcheck
+frontend/node_modules/
+frontend/dist/
+coverage/
