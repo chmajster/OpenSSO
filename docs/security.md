@@ -2,7 +2,7 @@
 
 ## Authentication
 
-Local passwords are hashed with Argon2id using a random salt per password. Verification uses constant-time comparison. The configured minimum length is enforced by the backend. Accounts created by an administrator and accounts receiving an administrative password reset are marked `must_change_password` and cannot use administrative capabilities until the user changes the password.
+Local passwords are hashed with Argon2id using a random salt per password. Verification uses constant-time comparison. The configured minimum length and optional uppercase, lowercase, digit and symbol requirements are enforced by the backend. The default policy enables all four complexity classes. Accounts created by an administrator and accounts receiving an administrative password reset are marked `must_change_password` and cannot use administrative capabilities until the user changes the password.
 
 Login attempts are throttled through Redis so limits are shared by horizontally scaled HTTP instances. Repeated failures increment account counters and can create a temporary lock according to the security policy.
 
