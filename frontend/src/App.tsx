@@ -10,6 +10,15 @@ function cookie(name:string){
   return value?decodeURIComponent(value.slice(prefix.length)):"";
 }
 
+function continueAuthorization(){
+  const returnTo=new URLSearchParams(window.location.search).get("return_to");
+  if(returnTo && (returnTo==="/oauth2/authorize" || returnTo.startsWith("/oauth2/authorize?"))){
+    window.location.assign(returnTo);
+    return true;
+  }
+  return false;
+}
+
 async function api(path:string, init:RequestInit={}) {
   const method=(init.method||"GET").toUpperCase();
   const headers:Record<string,string>={"Content-Type":"application/json",...(init.headers as Record<string,string>||{})};
@@ -102,13 +111,13 @@ function Bootstrap({onDone}:{onDone:()=>Promise<void>}){
 
 function Login({onDone}:{onDone:()=>Promise<void>}){
   const [busy,setBusy]=useState(false),[error,setError]=useState("");
-  const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setError("");const f=new FormData(e.currentTarget);try{await api("/api/v1/auth/login",{method:"POST",body:JSON.stringify({username:f.get("username"),password:f.get("password")})});await onDone()}catch(x){setError((x as Error).message)}finally{setBusy(false)}};
+  const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setError("");const f=new FormData(e.currentTarget);try{await api("/api/v1/auth/login",{method:"POST",body:JSON.stringify({username:f.get("username"),password:f.get("password")})});await onDone();continueAuthorization()}catch(x){setError((x as Error).message)}finally{setBusy(false)}};
   return <Centered><section className="card auth"><h1>Sign in</h1><p>Use your OpenSSO local account.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit}><Field name="username" label="Username or email"/><Field name="password" label="Password" type="password"/><button disabled={busy}>{busy?"Signing in…":"Sign in"}</button></form></section></Centered>
 }
 
 function ChangePassword({onDone}:{onDone:()=>Promise<void>}){
   const [busy,setBusy]=useState(false),[error,setError]=useState("");
-  const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setError("");const f=new FormData(e.currentTarget);try{await api("/api/v1/me/password",{method:"POST",body:JSON.stringify({current_password:f.get("current_password"),new_password:f.get("new_password")})});await onDone()}catch(x){setError((x as Error).message)}finally{setBusy(false)}};
+  const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setError("");const f=new FormData(e.currentTarget);try{await api("/api/v1/me/password",{method:"POST",body:JSON.stringify({current_password:f.get("current_password"),new_password:f.get("new_password")})});await onDone();continueAuthorization()}catch(x){setError((x as Error).message)}finally{setBusy(false)}};
   return <Centered><section className="card auth"><h1>Password change required</h1><p>Your administrator requires a new password before administrative access is granted.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit}><Field name="current_password" label="Current password" type="password"/><Field name="new_password" label="New password" type="password" minLength={12}/><button disabled={busy}>{busy?"Changing…":"Change password"}</button></form></section></Centered>
 }
 
@@ -165,7 +174,13 @@ function CreateForm({view,onCreated}:{view:View;onCreated:()=>void}){
     if(view==="users")result=await api("/api/v1/users",{method:"POST",body:JSON.stringify({username:f.get("username"),email:f.get("email"),display_name:f.get("display_name"),password:f.get("password")})});
     if(view==="groups")result=await api("/api/v1/groups",{method:"POST",body:JSON.stringify({name:f.get("name"),description:f.get("description")})});
     if(view==="roles")result=await api(`/api/v1/users/${f.get("user_id")}/roles`,{method:"POST",body:JSON.stringify({role_id:f.get("role_id")})});
-    if(view==="applications")result=await api("/api/v1/applications",{method:"POST",body:JSON.stringify({name:f.get("name"),public_client:f.get("public_client")==="on",redirect_uris:[f.get("redirect_uri")]})});
+    if(view==="applications")result=await api("/api/v1/applications",{method:"POST",body:JSON.stringify({
+      name:f.get("name"),
+      public_client:f.get("public_client")==="on",
+      redirect_uris:[f.get("redirect_uri")],
+      post_logout_redirect_uris:f.get("post_logout_redirect_uri")?[f.get("post_logout_redirect_uri")]:[],
+      allowed_scopes:String(f.get("allowed_scopes")||"openid profile email groups").split(/\s+/).filter(Boolean)
+    })});
     if(result?.client_secret)setSecret(result.client_secret);
     e.currentTarget.reset();onCreated();
   }catch(x){setError((x as Error).message)}finally{setBusy(false)}};
@@ -175,13 +190,13 @@ function CreateForm({view,onCreated}:{view:View;onCreated:()=>void}){
       {view==="users"&&<><Field name="username" label="Username"/><Field name="email" label="Email" type="email"/><Field name="display_name" label="Display name"/><Field name="password" label="Temporary password" type="password" minLength={12}/></>}
       {view==="groups"&&<><Field name="name" label="Name"/><Field name="description" label="Description"/></>}
       {view==="roles"&&<><Field name="user_id" label="User ID"/><Field name="role_id" label="Role ID"/></>}
-      {view==="applications"&&<><Field name="name" label="Application name"/><Field name="redirect_uri" label="Exact redirect URI"/><label className="check"><input name="public_client" type="checkbox"/> Public client</label></>}
+      {view==="applications"&&<><Field name="name" label="Application name"/><Field name="redirect_uri" label="Exact redirect URI"/><Field name="post_logout_redirect_uri" label="Post-logout redirect URI" required={false}/><Field name="allowed_scopes" label="Allowed scopes" defaultValue="openid profile email groups"/><label className="check"><input name="public_client" type="checkbox"/> Public client</label></>}
       <button disabled={busy}>{busy?"Saving…":"Save"}</button>
     </form>
   </section>
 }
 
-function Field({name,label,type="text",minLength}:{name:string;label:string;type?:string;minLength?:number}){return <label><span>{label}</span><input required name={name} type={type} minLength={minLength}/></label>}
+function Field({name,label,type="text",minLength,required=true,defaultValue}:{name:string;label:string;type?:string;minLength?:number;required?:boolean;defaultValue?:string}){return <label><span>{label}</span><input required={required} name={name} type={type} minLength={minLength} defaultValue={defaultValue}/></label>}
 function NumberField({name,label,value,min,max}:{name:string;label:string;value:number;min:number;max:number}){return <label><span>{label}</span><input required name={name} type="number" defaultValue={value} min={min} max={max}/></label>}
 function ErrorBox({text}:{text:string}){return <div className="error" role="alert">{text}</div>}
 function Centered({children}:{children:React.ReactNode}){return <div className="centered">{children}</div>}
@@ -192,7 +207,7 @@ function columns(v:View){return ({
   users:["id","username","email","display_name","active","must_change_password","locked_until","created_at"],
   groups:["id","name","description","created_at"],
   roles:["id","name","description"],
-  applications:["name","client_id","public_client","require_pkce","created_at"],
+  applications:["id","name","client_id","public_client","require_pkce","allowed_scopes","created_at"],
   sessions:["id","username","ip","user_agent","last_seen_at","expires_at"],
   audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"],
   dashboard:[],security:[]
