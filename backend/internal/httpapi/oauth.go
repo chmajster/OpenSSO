@@ -907,9 +907,13 @@ func splitScope(raw string) ([]string, error) {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(fields))
 	for _, scope := range fields {
-		if scope == "" || strings.ContainsAny(scope, "	
- "\\") {
+		if scope == "" {
 			return nil, errors.New("invalid scope")
+		}
+		for _, ch := range scope {
+			if ch <= 0x20 || ch == 0x7f || ch == 34 || ch == 92 {
+				return nil, errors.New("invalid scope")
+			}
 		}
 		if !seen[scope] {
 			seen[scope] = true
