@@ -1,118 +1,455 @@
 openapi: 3.1.0
 info:
-  title: OpenSSO Administrative API
-  version: 0.1.0
-  description: Administrative API implemented by the current OpenSSO foundation. Protocol endpoints are documented separately when complete.
+  title: OpenSSO Administrative and Self-Service API
+  version: 0.2.0
+  description: >
+    Cookie-authenticated IAM administration and self-service API. OIDC/OAuth
+    protocol endpoints and flows are documented in docs/oidc.md.
 servers:
   - url: /
+tags:
+  - { name: Setup }
+  - { name: Authentication }
+  - { name: Self service }
+  - { name: Users }
+  - { name: Groups }
+  - { name: RBAC }
+  - { name: Applications }
+  - { name: Sessions }
+  - { name: Security }
+  - { name: Audit }
 paths:
   /api/v1/setup/status:
     get:
-      summary: Read installation state
+      tags: [Setup]
+      summary: Read first-run initialization state
       responses:
         "200": { description: Installation state }
   /api/v1/setup/bootstrap:
     post:
-      summary: Create the first administrator
+      tags: [Setup]
+      summary: Create the first Super Admin
       security: [{ bootstrapToken: [] }]
       responses:
         "201": { description: Installation initialized }
-        "403": { description: Invalid or disabled bootstrap }
-        "409": { description: Already initialized }
+        "403": { description: Bootstrap disabled or credential invalid }
+        "409": { description: Installation already initialized }
+
   /api/v1/auth/login:
     post:
-      summary: Create an administrative browser session
+      tags: [Authentication]
+      summary: Create a browser session and CSRF cookie
       responses:
         "200": { description: Authenticated }
-        "401": { description: Invalid credentials }
+        "401": { description: Invalid credentials or account unavailable }
         "429": { description: Rate limited }
   /api/v1/auth/logout:
     post:
-      summary: Revoke current session
-      security: [{ sessionCookie: [] }]
+      tags: [Authentication]
+      summary: Revoke the current browser session
+      security: [{ sessionCookie: [], csrfHeader: [] }]
       responses:
         "204": { description: Session revoked }
+
   /api/v1/me:
     get:
-      summary: Current principal
+      tags: [Self service]
+      summary: Read current authenticated principal
       security: [{ sessionCookie: [] }]
       responses:
         "200": { description: Principal }
         "401": { description: Authentication required }
-  /api/v1/users:
+  /api/v1/me/access:
     get:
-      summary: List users
-      security: [{ sessionCookie: [] }]
-      responses: { "200": { description: Users } }
-    post:
-      summary: Create local user
+      tags: [Self service]
+      summary: Read current roles and effective permissions
       security: [{ sessionCookie: [] }]
       responses:
+        "200": { description: Roles and permissions }
+  /api/v1/me/profile:
+    get:
+      tags: [Self service]
+      summary: Read own profile
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Profile }
+    patch:
+      tags: [Self service]
+      summary: Update own email and display name
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
+        "200": { description: Profile updated }
+  /api/v1/me/password:
+    post:
+      tags: [Self service]
+      summary: Change own password
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
+        "204": { description: Password changed }
+        "401": { description: Current password invalid }
+  /api/v1/me/applications:
+    get:
+      tags: [Self service]
+      summary: List applications assigned directly or through groups
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Assigned applications }
+  /api/v1/me/sessions:
+    get:
+      tags: [Self service]
+      summary: List own active browser sessions
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Sessions }
+  /api/v1/me/sessions/{id}:
+    delete:
+      tags: [Self service]
+      summary: Revoke one own session
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Session revoked }
+        "404": { description: Active session not found }
+
+  /api/v1/dashboard:
+    get:
+      tags: [Security]
+      summary: Read IAM/security summary counters
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Dashboard counters }
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: List users
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Users }
+        "403": { description: Missing users.read }
+    post:
+      tags: [Users]
+      summary: Create a local user with forced first-login password change
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
         "201": { description: User created }
-        "403": { description: Missing permission }
+        "403": { description: Missing users.write }
+  /api/v1/users/{id}:
+    get:
+      tags: [Users]
+      summary: Read one user
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: User }
+        "404": { description: User not found }
+    patch:
+      tags: [Users]
+      summary: Update user profile and active state
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: User updated }
+  /api/v1/users/{id}/unlock:
+    post:
+      tags: [Users]
+      summary: Clear account lockout state
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: User unlocked }
+  /api/v1/users/{id}/reset-password:
+    post:
+      tags: [Users]
+      summary: Administratively reset password, force change and revoke sessions
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Password reset }
+  /api/v1/users/{id}/sessions/revoke-all:
+    post:
+      tags: [Sessions]
+      summary: Revoke all active browser sessions for one user
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: User sessions revoked }
+
   /api/v1/groups:
     get:
+      tags: [Groups]
       summary: List groups
       security: [{ sessionCookie: [] }]
-      responses: { "200": { description: Groups } }
+      responses:
+        "200": { description: Groups }
     post:
-      summary: Create group
-      security: [{ sessionCookie: [] }]
-      responses: { "201": { description: Group created } }
-  /api/v1/groups/{id}/members:
-    post:
-      summary: Add group member
+      tags: [Groups]
+      summary: Create a group
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
+        "201": { description: Group created }
+  /api/v1/groups/{id}:
+    get:
+      tags: [Groups]
+      summary: Read one group
       security: [{ sessionCookie: [] }]
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses: { "204": { description: Membership present } }
-  /api/v1/applications:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Group }
+    patch:
+      tags: [Groups]
+      summary: Update group
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Group updated }
+    delete:
+      tags: [Groups]
+      summary: Delete group
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Group deleted }
+  /api/v1/groups/{id}/members:
     get:
-      summary: List registered applications
+      tags: [Groups]
+      summary: List group members
       security: [{ sessionCookie: [] }]
-      responses: { "200": { description: Applications } }
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Members }
     post:
-      summary: Register an OIDC application configuration
-      description: Registers client metadata only. This does not imply that protocol endpoints are exposed.
-      security: [{ sessionCookie: [] }]
-      responses: { "201": { description: Application registered } }
+      tags: [Groups]
+      summary: Add group member
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Membership present }
+  /api/v1/groups/{id}/members/{userId}:
+    delete:
+      tags: [Groups]
+      summary: Remove group member
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Membership removed }
+
   /api/v1/roles:
     get:
-      summary: List roles
+      tags: [RBAC]
+      summary: List built-in roles
       security: [{ sessionCookie: [] }]
-      responses: { "200": { description: Roles } }
+      responses:
+        "200": { description: Roles }
   /api/v1/users/{id}/roles:
     get:
-      summary: List user roles
+      tags: [RBAC]
+      summary: List roles assigned to a user
       security: [{ sessionCookie: [] }]
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses: { "200": { description: Role assignments } }
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: User roles }
     post:
+      tags: [RBAC]
       summary: Assign role to user
-      security: [{ sessionCookie: [] }]
+      security: [{ sessionCookie: [], csrfHeader: [] }]
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses: { "200": { description: Role assigned } }
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Role assigned }
   /api/v1/users/{id}/roles/{roleId}:
     delete:
+      tags: [RBAC]
       summary: Remove role from user
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - { name: roleId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Role removed }
+
+  /api/v1/applications:
+    get:
+      tags: [Applications]
+      summary: List OIDC applications
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Applications }
+    post:
+      tags: [Applications]
+      summary: Create public or confidential OIDC application
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
+        "201":
+          description: >
+            Application created. Confidential clients receive client_secret once
+            in this response; it is not retrievable later.
+  /api/v1/applications/{id}:
+    put:
+      tags: [Applications]
+      summary: Update application metadata, enabled state, redirect URIs and scopes
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Application updated }
+  /api/v1/applications/{id}/integration:
+    get:
+      tags: [Applications]
+      summary: Read non-secret OIDC integration details
       security: [{ sessionCookie: [] }]
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: roleId, in: path, required: true, schema: { type: string, format: uuid } }
-      responses: { "204": { description: Assignment removed } }
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Integration metadata }
+  /api/v1/applications/{id}/rotate-secret:
+    post:
+      tags: [Applications]
+      summary: Rotate confidential client secret and return the new value once
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: New client secret }
+        "400": { description: Public client has no secret }
+  /api/v1/applications/{id}/assignments:
+    get:
+      tags: [Applications]
+      summary: List direct user and group assignments
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Assignments }
+  /api/v1/applications/{id}/assign/users:
+    post:
+      tags: [Applications]
+      summary: Assign application directly to user
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Assignment present }
+  /api/v1/applications/{id}/assign/users/{userId}:
+    delete:
+      tags: [Applications]
+      summary: Remove direct user assignment
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Assignment removed }
+  /api/v1/applications/{id}/assign/groups:
+    post:
+      tags: [Applications]
+      summary: Assign application to group
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Assignment present }
+  /api/v1/applications/{id}/assign/groups/{groupId}:
+    delete:
+      tags: [Applications]
+      summary: Remove group assignment
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - { name: groupId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Assignment removed }
+
+  /api/v1/sessions:
+    get:
+      tags: [Sessions]
+      summary: List all active browser sessions
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Sessions }
+  /api/v1/sessions/{id}:
+    delete:
+      tags: [Sessions]
+      summary: Revoke one active browser session
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Session revoked }
+  /api/v1/sessions/revoke-all:
+    post:
+      tags: [Sessions]
+      summary: Revoke every active browser session
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
+        "200": { description: Number of revoked sessions }
+
+  /api/v1/security/policy:
+    get:
+      tags: [Security]
+      summary: Read password, lockout and session policy
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Security policy }
+    put:
+      tags: [Security]
+      summary: Replace password, lockout and session policy
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
+        "200": { description: Security policy updated }
+  /api/v1/signing-keys:
+    get:
+      tags: [Security]
+      summary: List signing-key metadata
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Signing keys }
+  /api/v1/signing-keys/rotate:
+    post:
+      tags: [Security]
+      summary: Rotate active RS256 signing key
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
+        "201": { description: Signing key rotated }
+
   /api/v1/audit:
     get:
-      summary: Read audit events
+      tags: [Audit]
+      summary: Read recent authentication and administrative audit events
       security: [{ sessionCookie: [] }]
-      responses: { "200": { description: Audit events } }
+      responses:
+        "200": { description: Audit events }
+
 components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   securitySchemes:
     sessionCookie:
       type: apiKey
       in: cookie
       name: opensso_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
     bootstrapToken:
       type: http
       scheme: bearer
