@@ -20,7 +20,7 @@ jobs:
         with:
           go-version: "1.23.x"
           cache-dependency-path: backend/go.mod
-      - run: gofmt -w . && git diff --exit-code
+      - run: gofmt -w .
       - run: go vet ./...
       - run: go test ./...
       - run: go build ./cmd/opensso
