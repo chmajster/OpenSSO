@@ -3,6 +3,7 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
+RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/opensso ./cmd/opensso
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/opensso-healthcheck ./cmd/healthcheck
 
