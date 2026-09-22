@@ -14,8 +14,9 @@ type Config struct {
 	PublicURL      string
 	DatabaseURL    string
 	RedisURL       string
-	CookieSecure   bool
-	SessionTTL     time.Duration
+	CookieSecure      bool
+	TrustProxyHeaders bool
+	SessionTTL        time.Duration
 	BootstrapToken string
 	MasterKey      []byte
 }
@@ -26,7 +27,8 @@ func Load() (Config, error) {
 		PublicURL:      strings.TrimRight(env("OPENSSO_PUBLIC_URL", "http://localhost:8080"), "/"),
 		DatabaseURL:    os.Getenv("OPENSSO_DATABASE_URL"),
 		RedisURL:       env("OPENSSO_REDIS_URL", "redis://redis:6379/0"),
-		CookieSecure:   envBool("OPENSSO_COOKIE_SECURE", false),
+		CookieSecure:      envBool("OPENSSO_COOKIE_SECURE", false),
+		TrustProxyHeaders: envBool("OPENSSO_TRUST_PROXY_HEADERS", false),
 		SessionTTL:     envDuration("OPENSSO_SESSION_TTL", 12*time.Hour),
 		BootstrapToken: os.Getenv("OPENSSO_BOOTSTRAP_TOKEN"),
 	}
