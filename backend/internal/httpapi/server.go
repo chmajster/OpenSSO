@@ -586,7 +586,27 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"id": id, "client_id": clientID, "client_secret": secret, "allowed_scopes": scopes, "initiate_login_uri": strings.TrimSpace(in.InitiateLoginURI)})
 }
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
-	rows, e := s.db.Query(r.Context(), "SELECT id,occurred_at,COALESCE(actor_user_id::text,''),target_type,target_id,event,result,COALESCE(ip::text,''),request_id FROM audit_events ORDER BY occurred_at DESC LIMIT 500")
+	query := "SELECT id,occurred_at,COALESCE(actor_user_id::text,''),target_type,target_id,event,result,COALESCE(ip::text,''),request_id FROM audit_events WHERE 1=1"
+	args := []any{}
+	add := func(condition string, value string) {
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		query += fmt.Sprintf(" AND "+condition, len(args))
+	}
+	q := r.URL.Query()
+	add("(COALESCE(actor_user_id::text,'')=$%d OR (target_type='user' AND target_id=$%d))", q.Get("user_id"))
+	if q.Get("user_id") != "" {
+		query = strings.Replace(query, fmt.Sprintf("$%d)", len(args)), fmt.Sprintf("$%d)", len(args)), 1)
+	}
+	add("(target_type='application' AND target_id=$%d)", q.Get("application_id"))
+	add("event=$%d", q.Get("event"))
+	add("COALESCE(ip::text,'')=$%d", q.Get("ip"))
+	add("result=$%d", q.Get("result"))
+	query += " ORDER BY occurred_at DESC LIMIT 500"
+
+	rows, e := s.db.Query(r.Context(), query, args...)
 	if e != nil {
 		problem(w, 500, "database error")
 		return
