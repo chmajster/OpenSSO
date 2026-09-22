@@ -24,11 +24,11 @@ curl -fsS "$BASE_URL/health/ready" >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/setup/bootstrap" \
   -H "Authorization: Bearer $BOOTSTRAP_TOKEN" \
   -H "Content-Type: application/json" \
-  --data '{"username":"e2e-admin","email":"e2e-admin@example.test","display_name":"E2E Admin","password":"e2e-initial-password-123"}' >/dev/null
+  --data '{"username":"e2e-admin","email":"e2e-admin@example.test","display_name":"E2E Admin","password":"E2e-Initial-Password-123!"}' >/dev/null
 
 curl -fsS -c "$COOKIE_JAR" -X POST "$BASE_URL/api/v1/auth/login" \
   -H "Content-Type: application/json" \
-  --data '{"username":"e2e-admin","password":"e2e-initial-password-123"}' >/dev/null
+  --data '{"username":"e2e-admin","password":"E2e-Initial-Password-123!"}' >/dev/null
 
 CSRF="$(awk '$6=="opensso_csrf"{print $7}' "$COOKIE_JAR" | tail -n1)"
 test -n "$CSRF"
@@ -41,7 +41,7 @@ api_mutate() {
     -H "X-CSRF-Token: $CSRF" "$@"
 }
 
-USER_JSON="$(api_mutate POST /api/v1/users --data '{"username":"e2e-user","email":"e2e-user@example.test","display_name":"E2E User","password":"temporary-user-password-123"}')"
+USER_JSON="$(api_mutate POST /api/v1/users --data '{"username":"e2e-user","email":"e2e-user@example.test","display_name":"E2E User","password":"Temporary-User-Password-123!"}')"
 USER_ID="$(printf '%s' "$USER_JSON" | json_field id)"
 
 GROUP_JSON="$(api_mutate POST /api/v1/groups --data '{"name":"E2E Group","description":"Integration test group"}')"
@@ -93,12 +93,12 @@ api_mutate POST "/api/v1/users/$USER_ID/unlock" >/dev/null
 api_mutate POST "/api/v1/users/$USER_ID/sessions/revoke-all" >/dev/null
 
 POLICY="$(curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/v1/security/policy")"
-python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["password_min_length"] >= 12; assert d["lockout_threshold"] >= 3' <<<"$POLICY"
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["password_min_length"] >= 12; assert d["password_require_upper"] is True; assert d["password_require_lower"] is True; assert d["password_require_digit"] is True; assert d["password_require_symbol"] is True; assert d["lockout_threshold"] >= 3' <<<"$POLICY"
 
 
 curl -fsS -c "$USER_COOKIE_JAR" -X POST "$BASE_URL/api/v1/auth/login" \
   -H "Content-Type: application/json" \
-  --data '{"username":"e2e-user","password":"temporary-user-password-123"}' >/dev/null
+  --data '{"username":"e2e-user","password":"Temporary-User-Password-123!"}' >/dev/null
 USER_CSRF="$(awk '$6=="opensso_csrf"{print $7}' "$USER_COOKIE_JAR" | tail -n1)"
 test -n "$USER_CSRF"
 
@@ -112,7 +112,7 @@ user_mutate() {
 
 curl -fsS -b "$USER_COOKIE_JAR" "$BASE_URL/api/v1/me" |
   python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["Username"]=="e2e-user"; assert d["MustChangePassword"] is True'
-user_mutate POST /api/v1/me/password --data '{"current_password":"temporary-user-password-123","new_password":"e2e-user-new-password-456"}' >/dev/null
+user_mutate POST /api/v1/me/password --data '{"current_password":"Temporary-User-Password-123!","new_password":"E2e-User-New-Password-456!"}' >/dev/null
 curl -fsS -b "$USER_COOKIE_JAR" "$BASE_URL/api/v1/me/access" |
   python3 -c 'import json,sys; d=json.load(sys.stdin); assert "User" in d["roles"]; assert d["permissions"]==[]'
 curl -fsS -b "$USER_COOKIE_JAR" "$BASE_URL/api/v1/me/applications" |
