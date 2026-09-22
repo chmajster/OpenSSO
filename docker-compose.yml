@@ -17,6 +17,7 @@ services:
       OPENSSO_REDIS_URL: "redis://redis:6379/0"
       OPENSSO_COOKIE_SECURE: "${OPENSSO_COOKIE_SECURE:-false}"
       OPENSSO_BOOTSTRAP_TOKEN: "${OPENSSO_BOOTSTRAP_TOKEN}"
+      OPENSSO_MASTER_KEY: "${OPENSSO_MASTER_KEY}"
     depends_on:
       postgres:
         condition: service_healthy
