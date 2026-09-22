@@ -201,7 +201,10 @@ func (s *Server) createGroup(w http.ResponseWriter,r *http.Request){
 }
 func (s *Server) addGroupMember(w http.ResponseWriter,r *http.Request){
 	var in struct{UserID string `json:"user_id"`};if decodeJSON(w,r,&in)!=nil{return};gid:=r.PathValue("id")
-	if _,e:=s.db.Exec(r.Context(),"INSERT INTO group_memberships(group_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING",gid,in.UserID);e!=nil{problem(w,400,"invalid group or user");return}
+	var valid bool
+	if e:=s.db.QueryRow(r.Context(),"SELECT EXISTS(SELECT 1 FROM groups g,users u WHERE g.id=$1::uuid AND u.id=$2::uuid)",gid,in.UserID).Scan(&valid);e!=nil{problem(w,400,"invalid group or user identifier");return}
+	if !valid{problem(w,404,"group or user not found");return}
+	if _,e:=s.db.Exec(r.Context(),"INSERT INTO group_memberships(group_id,user_id) VALUES($1::uuid,$2::uuid) ON CONFLICT DO NOTHING",gid,in.UserID);e!=nil{problem(w,500,"failed to add group membership");return}
 	p:=r.Context().Value(principalKey).(principal);_=s.audit(r.Context(),&p.UserID,"GROUP_MEMBERSHIP_ADDED","group",gid,"success",r);w.WriteHeader(204)
 }
 func (s *Server) listApplications(w http.ResponseWriter,r *http.Request){
