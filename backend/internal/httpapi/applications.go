@@ -31,18 +31,18 @@ func (s *Server) applicationIntegration(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"name": name,
-		"issuer": s.cfg.PublicURL,
-		"authorization_url": s.cfg.PublicURL + "/oauth2/authorize",
-		"token_url": s.cfg.PublicURL + "/oauth2/token",
-		"userinfo_url": s.cfg.PublicURL + "/userinfo",
-		"jwks_url": s.cfg.PublicURL + "/.well-known/jwks.json",
-		"logout_url": s.cfg.PublicURL + "/oauth2/logout",
-		"client_id": clientID,
-		"public_client": public,
+		"name":                      name,
+		"issuer":                    s.cfg.PublicURL,
+		"authorization_url":         s.cfg.PublicURL + "/oauth2/authorize",
+		"token_url":                 s.cfg.PublicURL + "/oauth2/token",
+		"userinfo_url":              s.cfg.PublicURL + "/userinfo",
+		"jwks_url":                  s.cfg.PublicURL + "/.well-known/jwks.json",
+		"logout_url":                s.cfg.PublicURL + "/oauth2/logout",
+		"client_id":                 clientID,
+		"public_client":             public,
 		"client_secret_retrievable": false,
-		"scopes": scopes,
-		"redirect_uris": redirects,
+		"scopes":                    scopes,
+		"redirect_uris":             redirects,
 		"post_logout_redirect_uris": logoutRedirects,
 	})
 }

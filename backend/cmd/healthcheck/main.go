@@ -6,9 +6,11 @@ import (
 	"time"
 )
 
-func main(){
-	c:=http.Client{Timeout:2*time.Second}
-	r,e:=c.Get("http://127.0.0.1:8080/health/ready")
-	if e!=nil||r.StatusCode!=http.StatusOK{os.Exit(1)}
+func main() {
+	c := http.Client{Timeout: 2 * time.Second}
+	r, e := c.Get("http://127.0.0.1:8080/health/ready")
+	if e != nil || r.StatusCode != http.StatusOK {
+		os.Exit(1)
+	}
 	r.Body.Close()
 }

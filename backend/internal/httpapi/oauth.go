@@ -19,16 +19,16 @@ import (
 )
 
 type oauthClient struct {
-	ApplicationID   string
-	Name            string
-	ClientID        string
-	SecretHash      *string
-	Public          bool
-	RequirePKCE     bool
-	AllowedScopes   []string
-	AccessTTL       int
-	IDTTL           int
-	RefreshTTL      int
+	ApplicationID string
+	Name          string
+	ClientID      string
+	SecretHash    *string
+	Public        bool
+	RequirePKCE   bool
+	AllowedScopes []string
+	AccessTTL     int
+	IDTTL         int
+	RefreshTTL    int
 }
 
 type accessClaims struct {
@@ -166,8 +166,8 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = consentPage.Execute(w, map[string]any{
-		"Application": client.Name,
-		"Scopes":      scopes,
+		"Application":  client.Name,
+		"Scopes":       scopes,
 		"RequestToken": requestToken,
 		"CSRF":         csrf.Value,
 	})
@@ -516,12 +516,12 @@ func (s *Server) introspectToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOAuthJSON(w, 200, map[string]any{
-		"active": dbRevoked == nil && time.Now().Before(dbExpires),
-		"client_id": client.ClientID,
-		"sub": claims.Subject,
-		"scope": dbScope,
-		"exp": dbExpires.Unix(),
-		"iat": claims.IssuedAt.Unix(),
+		"active":     dbRevoked == nil && time.Now().Before(dbExpires),
+		"client_id":  client.ClientID,
+		"sub":        claims.Subject,
+		"scope":      dbScope,
+		"exp":        dbExpires.Unix(),
+		"iat":        claims.IssuedAt.Unix(),
 		"token_type": "access_token",
 	})
 }
@@ -737,15 +737,15 @@ func (s *Server) issueAccessToken(ctx context.Context, tx pgx.Tx, client oauthCl
 	now := time.Now().UTC()
 	expires := now.Add(time.Duration(client.AccessTTL) * time.Second)
 	claims := accessClaims{
-		Scope: scope,
+		Scope:    scope,
 		TokenUse: "access",
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer: s.cfg.PublicURL,
-			Subject: subject,
-			Audience: jwt.ClaimStrings{client.ClientID},
+			Issuer:    s.cfg.PublicURL,
+			Subject:   subject,
+			Audience:  jwt.ClaimStrings{client.ClientID},
 			ExpiresAt: jwt.NewNumericDate(expires),
-			IssuedAt: jwt.NewNumericDate(now),
-			ID: jti,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ID:        jti,
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -762,9 +762,9 @@ func (s *Server) issueAccessToken(ctx context.Context, tx pgx.Tx, client oauthCl
 	}
 	return map[string]any{
 		"access_token": signed,
-		"token_type": "Bearer",
-		"expires_in": client.AccessTTL,
-		"scope": scope,
+		"token_type":   "Bearer",
+		"expires_in":   client.AccessTTL,
+		"scope":        scope,
 	}, nil
 }
 
@@ -782,11 +782,11 @@ func (s *Server) signIDToken(ctx context.Context, client oauthClient, userID, sc
 	claims := idClaims{
 		Nonce: nonce,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer: s.cfg.PublicURL,
-			Subject: userID,
-			Audience: jwt.ClaimStrings{client.ClientID},
+			Issuer:    s.cfg.PublicURL,
+			Subject:   userID,
+			Audience:  jwt.ClaimStrings{client.ClientID},
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(client.IDTTL) * time.Second)),
-			IssuedAt: jwt.NewNumericDate(now),
+			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
 	scopes, _ := splitScope(scope)

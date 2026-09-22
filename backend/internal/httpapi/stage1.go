@@ -321,12 +321,12 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"users": users,
-		"active_users": activeUsers,
-		"locked_users": lockedUsers,
-		"applications": applications,
-		"active_sessions": sessions,
-		"logins_24h": logins24h,
+		"users":             users,
+		"active_users":      activeUsers,
+		"locked_users":      lockedUsers,
+		"applications":      applications,
+		"active_sessions":   sessions,
+		"logins_24h":        logins24h,
 		"failed_logins_24h": failed24h,
 	})
 }
