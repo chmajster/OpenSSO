@@ -10,7 +10,7 @@ Identity and administration:
 - forced password change after administrator-created accounts and resets;
 - groups with membership management;
 - backend-enforced RBAC with Super Admin, Admin, User Administrator, Application Administrator, Security Administrator, Read Only Administrator and User roles;
-- security policy for password length, account lockout and browser-session TTL;
+- security policy for password length, configurable upper/lower/digit/symbol complexity, account lockout and browser-session TTL;
 - per-user, per-session and global browser-session revocation;
 - immutable-style audit events for authentication and administrative mutations;
 - permission-aware administration UI with search and pagination;
