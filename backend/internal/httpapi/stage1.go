@@ -4,21 +4,31 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/chmajster/OpenSSO/backend/internal/security"
 )
 
 type securityPolicy struct {
-	PasswordMinLength int `json:"password_min_length"`
-	LockoutThreshold  int `json:"lockout_threshold"`
-	LockoutMinutes    int `json:"lockout_minutes"`
-	SessionTTLMinutes int `json:"session_ttl_minutes"`
+	PasswordMinLength    int  `json:"password_min_length"`
+	PasswordRequireUpper bool `json:"password_require_upper"`
+	PasswordRequireLower bool `json:"password_require_lower"`
+	PasswordRequireDigit bool `json:"password_require_digit"`
+	PasswordRequireSymbol bool `json:"password_require_symbol"`
+	LockoutThreshold     int  `json:"lockout_threshold"`
+	LockoutMinutes       int  `json:"lockout_minutes"`
+	SessionTTLMinutes    int  `json:"session_ttl_minutes"`
 }
 
 func (s *Server) getSecurityPolicy(r *http.Request) (securityPolicy, error) {
 	var p securityPolicy
-	err := s.db.QueryRow(r.Context(), `SELECT password_min_length,lockout_threshold,lockout_minutes,session_ttl_minutes FROM security_policies WHERE id=1`).Scan(
-		&p.PasswordMinLength, &p.LockoutThreshold, &p.LockoutMinutes, &p.SessionTTLMinutes,
+	err := s.db.QueryRow(r.Context(), `
+		SELECT password_min_length,password_require_upper,password_require_lower,password_require_digit,password_require_symbol,
+		       lockout_threshold,lockout_minutes,session_ttl_minutes
+		FROM security_policies WHERE id=1
+	`).Scan(
+		&p.PasswordMinLength, &p.PasswordRequireUpper, &p.PasswordRequireLower, &p.PasswordRequireDigit, &p.PasswordRequireSymbol,
+		&p.LockoutThreshold, &p.LockoutMinutes, &p.SessionTTLMinutes,
 	)
 	return p, err
 }
@@ -46,9 +56,11 @@ func (s *Server) updateSecurityPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err := s.db.Exec(r.Context(), `
 		UPDATE security_policies
-		SET password_min_length=$1,lockout_threshold=$2,lockout_minutes=$3,session_ttl_minutes=$4,updated_at=now()
+		SET password_min_length=$1,password_require_upper=$2,password_require_lower=$3,password_require_digit=$4,password_require_symbol=$5,
+		    lockout_threshold=$6,lockout_minutes=$7,session_ttl_minutes=$8,updated_at=now()
 		WHERE id=1
-	`, in.PasswordMinLength, in.LockoutThreshold, in.LockoutMinutes, in.SessionTTLMinutes)
+	`, in.PasswordMinLength, in.PasswordRequireUpper, in.PasswordRequireLower, in.PasswordRequireDigit, in.PasswordRequireSymbol,
+		in.LockoutThreshold, in.LockoutMinutes, in.SessionTTLMinutes)
 	if err != nil {
 		problem(w, 500, "database error")
 		return
@@ -56,6 +68,32 @@ func (s *Server) updateSecurityPolicy(w http.ResponseWriter, r *http.Request) {
 	p := r.Context().Value(principalKey).(principal)
 	_ = s.audit(r.Context(), &p.UserID, "POLICY_CHANGED", "security_policy", "1", "success", r)
 	writeJSON(w, 200, in)
+}
+
+func passwordPolicyViolation(policy securityPolicy, password string) string {
+	if len([]rune(password)) < policy.PasswordMinLength {
+		return "password does not meet current minimum length"
+	}
+	var upper, lower, digit, symbol bool
+	for _, r := range password {
+		upper = upper || unicode.IsUpper(r)
+		lower = lower || unicode.IsLower(r)
+		digit = digit || unicode.IsDigit(r)
+		symbol = symbol || unicode.IsPunct(r) || unicode.IsSymbol(r)
+	}
+	if policy.PasswordRequireUpper && !upper {
+		return "password must contain an uppercase letter"
+	}
+	if policy.PasswordRequireLower && !lower {
+		return "password must contain a lowercase letter"
+	}
+	if policy.PasswordRequireDigit && !digit {
+		return "password must contain a digit"
+	}
+	if policy.PasswordRequireSymbol && !symbol {
+		return "password must contain a symbol"
+	}
+	return ""
 }
 
 func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
@@ -148,8 +186,8 @@ func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "database error")
 		return
 	}
-	if len(in.Password) < policy.PasswordMinLength {
-		problem(w, 400, "password does not meet current minimum length")
+	if violation := passwordPolicyViolation(policy, in.Password); violation != "" {
+		problem(w, 400, violation)
 		return
 	}
 	hash, err := security.HashPassword(in.Password)
@@ -211,8 +249,8 @@ func (s *Server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "database error")
 		return
 	}
-	if len(in.NewPassword) < policy.PasswordMinLength {
-		problem(w, 400, "new password does not meet current minimum length")
+	if violation := passwordPolicyViolation(policy, in.NewPassword); violation != "" {
+		problem(w, 400, violation)
 		return
 	}
 	if security.VerifyPassword(currentHash, in.NewPassword) {
