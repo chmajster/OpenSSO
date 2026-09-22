@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -76,6 +77,14 @@ func (s *Server) middleware(next http.Handler)http.Handler{
 		w.Header().Set("X-Frame-Options","DENY")
 		w.Header().Set("Referrer-Policy","no-referrer")
 		w.Header().Set("Content-Security-Policy","default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		if !strings.HasPrefix(r.URL.Path,"/health/"){
+			expected,err:=url.Parse(s.cfg.PublicURL);if err!=nil||expected.Host==""{problem(w,500,"invalid public URL configuration");return}
+			if !strings.EqualFold(r.Host,expected.Host){problem(w,400,"invalid host");return}
+		}
+		if r.Method!="GET"&&r.Method!="HEAD"&&r.Method!="OPTIONS"&&r.URL.Path!="/api/v1/auth/login"&&r.URL.Path!="/api/v1/setup/bootstrap"{
+			cookie,err:=r.Cookie("opensso_csrf");header:=r.Header.Get("X-CSRF-Token")
+			if err!=nil||header==""||subtle.ConstantTimeCompare([]byte(cookie.Value),[]byte(header))!=1{problem(w,403,"CSRF validation failed");return}
+		}
 		next.ServeHTTP(w,r.WithContext(context.WithValue(r.Context(),requestIDKey,rid)))
 	})
 }
@@ -126,13 +135,15 @@ func (s *Server) login(w http.ResponseWriter,r *http.Request){
 	token,e:=security.RandomToken(32);if e!=nil{problem(w,500,"entropy failure");return};expires:=time.Now().Add(time.Duration(policy.SessionTTLMinutes)*time.Minute)
 	if _,e=s.db.Exec(r.Context(),"INSERT INTO sessions(user_id,token_hash,ip,user_agent,expires_at) VALUES($1,$2,$3,$4,$5)",uid,security.SHA256String(token),nullableIP(ip),truncate(r.UserAgent(),512),expires);e!=nil{problem(w,500,"database error");return}
 	_,_=s.db.Exec(r.Context(),"UPDATE users SET failed_logins=0,locked_until=NULL WHERE id=$1",uid);_=s.audit(r.Context(),&uid,"LOGIN_SUCCESS","user",uid,"success",r)
+	csrf,e:=security.RandomToken(24);if e!=nil{problem(w,500,"entropy failure");return}
 	http.SetCookie(w,&http.Cookie{Name:"opensso_session",Value:token,Path:"/",HttpOnly:true,Secure:s.cfg.CookieSecure,SameSite:http.SameSiteLaxMode,Expires:expires})
+	http.SetCookie(w,&http.Cookie{Name:"opensso_csrf",Value:csrf,Path:"/",HttpOnly:false,Secure:s.cfg.CookieSecure,SameSite:http.SameSiteLaxMode,Expires:expires})
 	writeJSON(w,200,map[string]any{"user_id":uid,"username":username,"expires_at":expires})
 }
 func (s *Server) logout(w http.ResponseWriter,r *http.Request){
 	if c,e:=r.Cookie("opensso_session");e==nil{_,_=s.db.Exec(r.Context(),"UPDATE sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL",security.SHA256String(c.Value))}
 	p:=r.Context().Value(principalKey).(principal);_=s.audit(r.Context(),&p.UserID,"LOGOUT","user",p.UserID,"success",r)
-	http.SetCookie(w,&http.Cookie{Name:"opensso_session",Value:"",Path:"/",HttpOnly:true,Secure:s.cfg.CookieSecure,SameSite:http.SameSiteLaxMode,MaxAge:-1});w.WriteHeader(204)
+	http.SetCookie(w,&http.Cookie{Name:"opensso_session",Value:"",Path:"/",HttpOnly:true,Secure:s.cfg.CookieSecure,SameSite:http.SameSiteLaxMode,MaxAge:-1});http.SetCookie(w,&http.Cookie{Name:"opensso_csrf",Value:"",Path:"/",HttpOnly:false,Secure:s.cfg.CookieSecure,SameSite:http.SameSiteLaxMode,MaxAge:-1});w.WriteHeader(204)
 }
 func (s *Server) me(w http.ResponseWriter,r *http.Request){writeJSON(w,200,r.Context().Value(principalKey))}
 func (s *Server) withPrincipal(next http.HandlerFunc)http.HandlerFunc{
@@ -153,8 +164,8 @@ func (s *Server) require(permission string,next http.HandlerFunc)http.HandlerFun
 	})
 }
 func (s *Server) listUsers(w http.ResponseWriter,r *http.Request){
-	rows,e:=s.db.Query(r.Context(),"SELECT id,username,email,display_name,active,created_at FROM users ORDER BY username LIMIT 500");if e!=nil{problem(w,500,"database error");return};defer rows.Close()
-	items:=[]map[string]any{};for rows.Next(){var id,u,em,d string;var active bool;var created time.Time;if rows.Scan(&id,&u,&em,&d,&active,&created)!=nil{problem(w,500,"database error");return};items=append(items,map[string]any{"id":id,"username":u,"email":em,"display_name":d,"active":active,"created_at":created})};writeJSON(w,200,map[string]any{"items":items})
+	rows,e:=s.db.Query(r.Context(),"SELECT id,username,email,display_name,active,must_change_password,locked_until,created_at FROM users ORDER BY username LIMIT 500");if e!=nil{problem(w,500,"database error");return};defer rows.Close()
+	items:=[]map[string]any{};for rows.Next(){var id,u,em,d string;var active,mustChange bool;var locked *time.Time;var created time.Time;if rows.Scan(&id,&u,&em,&d,&active,&mustChange,&locked,&created)!=nil{problem(w,500,"database error");return};items=append(items,map[string]any{"id":id,"username":u,"email":em,"display_name":d,"active":active,"must_change_password":mustChange,"locked_until":locked,"created_at":created})};writeJSON(w,200,map[string]any{"items":items})
 }
 func (s *Server) createUser(w http.ResponseWriter,r *http.Request){
 	var in struct{Username string `json:"username"`;Email string `json:"email"`;DisplayName string `json:"display_name"`;Password string `json:"password"`}
