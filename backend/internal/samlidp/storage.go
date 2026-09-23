@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/chmajster/OpenSSO/backend/internal/security"
-	"github.com/zitadel/saml/pkg/provider"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zitadel/saml/pkg/provider"
 	"github.com/zitadel/saml/pkg/provider/key"
 	"github.com/zitadel/saml/pkg/provider/models"
 	"github.com/zitadel/saml/pkg/provider/serviceprovider"
