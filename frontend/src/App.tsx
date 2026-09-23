@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { api } from "./http";
+import { MFAChallenge, MFASettings } from "./mfa";
 
 type Item = Record<string, unknown>;
 type View =
@@ -20,12 +22,6 @@ type Me = {
 
 type Access = { roles:string[]; permissions:string[] };
 
-function cookie(name:string){
-  const prefix=name+"=";
-  const value=document.cookie.split("; ").find(x=>x.startsWith(prefix));
-  return value?decodeURIComponent(value.slice(prefix.length)):"";
-}
-
 function continueAuthorization(){
   const returnTo=new URLSearchParams(window.location.search).get("return_to");
   if(returnTo && (returnTo==="/oauth2/authorize" || returnTo.startsWith("/oauth2/authorize?"))){
@@ -33,20 +29,6 @@ function continueAuthorization(){
     return true;
   }
   return false;
-}
-
-async function api(path:string, init:RequestInit={}) {
-  const method=(init.method||"GET").toUpperCase();
-  const headers:Record<string,string>={"Content-Type":"application/json",...(init.headers as Record<string,string>||{})};
-  if(!["GET","HEAD","OPTIONS"].includes(method)){
-    const csrf=cookie("opensso_csrf");
-    if(csrf)headers["X-CSRF-Token"]=csrf;
-  }
-  const r=await fetch(path,{credentials:"include",...init,headers});
-  if(r.status===204)return null;
-  const body=await r.json().catch(()=>({detail:"Invalid server response"}));
-  if(!r.ok)throw new Error(body.detail||body.error||`HTTP ${r.status}`);
-  return body;
 }
 
 const adminResourceEndpoints: Partial<Record<View,string>> = {
@@ -128,7 +110,7 @@ export default function App(){
   if(!me)return <Login onDone={refreshSession}/>;
   if(Boolean(me.MustChangePassword ?? me.must_change_password))return <ChangePassword onDone={refreshSession}/>;
   const forceMFA=new URLSearchParams(window.location.search).get("mfa")==="required";
-  if((Boolean(me.mfa_required)||forceMFA) && !Boolean(me.mfa_verified))return <MFAChallenge onDone={refreshSession}/>;
+  if((Boolean(me.mfa_required)||forceMFA) && !Boolean(me.mfa_verified))return <MFAChallenge onDone={async()=>{await refreshSession();continueAuthorization()}}/>;
 
   const logout=async()=>{await api("/api/v1/auth/logout",{method:"POST"});setMe(null);setAccess(null)};
   const reload=()=>setReloadKey(x=>x+1);
