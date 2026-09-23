@@ -298,6 +298,8 @@ func (s *webAuthnService) loadUser(ctx context.Context, userID string, ensureHan
 		if err = s.db.QueryRow(ctx, `SELECT user_handle FROM webauthn_users WHERE user_id=$1`, userID).Scan(&handle); err != nil {
 			return nil, err
 		}
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotEnrolled
 	} else if err != nil {
 		return nil, err
 	}
