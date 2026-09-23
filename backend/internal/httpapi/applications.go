@@ -8,6 +8,19 @@ import (
 
 func (s *Server) applicationIntegration(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	var protocol string
+	if err := s.db.QueryRow(r.Context(), `SELECT protocol FROM applications WHERE id=$1`, id).Scan(&protocol); err != nil {
+		problem(w, 404, "application not found")
+		return
+	}
+	if protocol == "saml" {
+		s.samlApplicationIntegration(w, r)
+		return
+	}
+	if protocol != "oidc" {
+		problem(w, 404, "unsupported application protocol")
+		return
+	}
 	var name, clientID string
 	var public bool
 	var scopes []string
