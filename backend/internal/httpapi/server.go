@@ -278,18 +278,31 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		problem(w, 401, "invalid credentials")
 		return
 	}
+
+	mfaStatus, e := s.mfa.Status(r.Context(), uid, nil)
+	if e != nil {
+		problem(w, 500, "MFA policy lookup failed")
+		return
+	}
+
 	token, e := security.RandomToken(32)
 	if e != nil {
 		problem(w, 500, "entropy failure")
 		return
 	}
 	expires := time.Now().Add(time.Duration(policy.SessionTTLMinutes) * time.Minute)
-	if _, e = s.db.Exec(r.Context(), "INSERT INTO sessions(user_id,token_hash,ip,user_agent,expires_at) VALUES($1,$2,$3,$4,$5)", uid, security.SHA256String(token), nullableIP(ip), truncate(r.UserAgent(), 512), expires); e != nil {
+	var sessionID string
+	if e = s.db.QueryRow(r.Context(), "INSERT INTO sessions(user_id,token_hash,ip,user_agent,expires_at) VALUES($1,$2,$3,$4,$5) RETURNING id", uid, security.SHA256String(token), nullableIP(ip), truncate(r.UserAgent(), 512), expires).Scan(&sessionID); e != nil {
 		problem(w, 500, "database error")
 		return
 	}
 	_, _ = s.db.Exec(r.Context(), "UPDATE users SET failed_logins=0,locked_until=NULL WHERE id=$1", uid)
-	_ = s.audit(r.Context(), &uid, "LOGIN_SUCCESS", "user", uid, "success", r)
+	if mfaStatus.Required {
+		_ = s.audit(r.Context(), &uid, "LOGIN_PRIMARY_SUCCESS", "user", uid, "success", r)
+	} else {
+		_ = s.audit(r.Context(), &uid, "LOGIN_SUCCESS", "user", uid, "success", r)
+	}
+
 	csrf, e := security.RandomToken(24)
 	if e != nil {
 		problem(w, 500, "entropy failure")
@@ -297,8 +310,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: "opensso_session", Value: token, Path: "/", HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
 	http.SetCookie(w, &http.Cookie{Name: "opensso_csrf", Value: csrf, Path: "/", HttpOnly: false, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
-	writeJSON(w, 200, map[string]any{"user_id": uid, "username": username, "expires_at": expires})
+	writeJSON(w, 200, map[string]any{
+		"user_id": uid,
+		"username": username,
+		"session_id": sessionID,
+		"expires_at": expires,
+		"mfa_required": mfaStatus.Required,
+		"mfa_enrollment_required": mfaStatus.Required && !mfaStatus.HasPrimaryFactor,
+	})
 }
+
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, e := r.Cookie("opensso_session"); e == nil {
 		_, _ = s.db.Exec(r.Context(), "UPDATE sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL", security.SHA256String(c.Value))
@@ -307,28 +328,66 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	_ = s.audit(r.Context(), &p.UserID, "LOGOUT", "user", p.UserID, "success", r)
 	http.SetCookie(w, &http.Cookie{Name: "opensso_session", Value: "", Path: "/", HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	http.SetCookie(w, &http.Cookie{Name: "opensso_csrf", Value: "", Path: "/", HttpOnly: false, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	w.WriteHeader(204)
+	w.WriteHeader(http.StatusNoContent)
 }
+
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, r.Context().Value(principalKey))
+	p := r.Context().Value(principalKey).(principal)
+	status, err := s.mfa.Status(r.Context(), p.UserID, nil)
+	if err != nil {
+		problem(w, 500, "MFA status lookup failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"session_id": p.SessionID,
+		"user_id": p.UserID,
+		"username": p.Username,
+		"must_change_password": p.MustChangePassword,
+		"mfa_verified": p.MFAVerified,
+		"mfa_required": status.Required,
+		"mfa_enrollment_required": status.Required && !status.HasPrimaryFactor,
+	})
 }
-func (s *Server) withPrincipal(next http.HandlerFunc) http.HandlerFunc {
+
+func (s *Server) withPrincipalRaw(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, e := r.Cookie("opensso_session")
-		if e != nil {
+		cookie, err := r.Cookie("opensso_session")
+		if err != nil {
 			problem(w, 401, "authentication required")
 			return
 		}
 		var p principal
-		e = s.db.QueryRow(r.Context(), "SELECT u.id,u.username,u.must_change_password FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active=true", security.SHA256String(c.Value)).Scan(&p.UserID, &p.Username, &p.MustChangePassword)
-		if e != nil {
+		err = s.db.QueryRow(r.Context(), `
+			SELECT s.id,u.id,u.username,u.must_change_password,(s.mfa_verified_at IS NOT NULL)
+			FROM sessions s
+			JOIN users u ON u.id=s.user_id
+			WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active=true
+		`, security.SHA256String(cookie.Value)).Scan(&p.SessionID, &p.UserID, &p.Username, &p.MustChangePassword, &p.MFAVerified)
+		if err != nil {
 			problem(w, 401, "authentication required")
 			return
 		}
-		_, _ = s.db.Exec(r.Context(), "UPDATE sessions SET last_seen_at=now() WHERE token_hash=$1", security.SHA256String(c.Value))
+		_, _ = s.db.Exec(r.Context(), "UPDATE sessions SET last_seen_at=now() WHERE id=$1", p.SessionID)
 		next(w, r.WithContext(context.WithValue(r.Context(), principalKey, p)))
 	}
 }
+
+func (s *Server) withPrincipal(next http.HandlerFunc) http.HandlerFunc {
+	return s.withPrincipalRaw(func(w http.ResponseWriter, r *http.Request) {
+		p := r.Context().Value(principalKey).(principal)
+		required, err := s.mfa.Required(r.Context(), p.UserID, nil)
+		if err != nil {
+			problem(w, 500, "MFA policy lookup failed")
+			return
+		}
+		if required && !p.MFAVerified {
+			problem(w, 403, "MFA verification required")
+			return
+		}
+		next(w, r)
+	})
+}
+
 func (s *Server) require(permission string, next http.HandlerFunc) http.HandlerFunc {
 	return s.withPrincipal(func(w http.ResponseWriter, r *http.Request) {
 		p := r.Context().Value(principalKey).(principal)
@@ -345,6 +404,7 @@ func (s *Server) require(permission string, next http.HandlerFunc) http.HandlerF
 		next(w, r)
 	})
 }
+
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	rows, e := s.db.Query(r.Context(), "SELECT id,username,email,display_name,active,must_change_password,locked_until,created_at FROM users ORDER BY username LIMIT 500")
 	if e != nil {
