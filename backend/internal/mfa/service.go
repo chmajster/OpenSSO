@@ -161,8 +161,8 @@ func (s *Service) BeginTOTP(ctx context.Context, userID, accountName string) (TO
 		return TOTPEnrollment{}, err
 	}
 	return TOTPEnrollment{
-		Secret: key.Secret(),
-		OTPAuthURL: key.URL(),
+		Secret:        key.Secret(),
+		OTPAuthURL:    key.URL(),
 		QRCodeDataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBuffer.Bytes()),
 	}, nil
 }
