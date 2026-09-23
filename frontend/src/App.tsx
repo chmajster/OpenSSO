@@ -23,8 +23,15 @@ function cookie(name:string){
   return value?decodeURIComponent(value.slice(prefix.length)):"";
 }
 
-function continueAuthorization(){
-  const returnTo=new URLSearchParams(window.location.search).get("return_to");
+async function continueAuthorization(){
+  const params=new URLSearchParams(window.location.search);
+  const samlRequestId=params.get("saml_request_id");
+  if(samlRequestId){
+    const result=await api("/api/v1/saml/continue",{method:"POST",body:JSON.stringify({request_id:samlRequestId})});
+    window.location.assign(String(result.callback_url));
+    return true;
+  }
+  const returnTo=params.get("return_to");
   if(returnTo && (returnTo==="/oauth2/authorize" || returnTo.startsWith("/oauth2/authorize?"))){
     window.location.assign(returnTo);
     return true;
@@ -94,6 +101,13 @@ export default function App(){
   useEffect(()=>{refreshSession().catch(e=>setError(e.message));},[]);
 
   useEffect(()=>{
+    if(!me || Boolean(me.MustChangePassword ?? me.must_change_password))return;
+    if(new URLSearchParams(window.location.search).get("saml_request_id")){
+      void continueAuthorization().catch(e=>setError(e.message));
+    }
+  },[me]);
+
+  useEffect(()=>{
     if(!me)return;
     setLoading(true);
     setError("");
@@ -144,7 +158,7 @@ export default function App(){
        view==="audit"?<AuditView/>:
        view==="my-apps"?<MyApplications items={items} loading={loading}/>:
        view==="my-sessions"?<MySessions items={items} loading={loading} reload={reload}/>:
-       <ResourceView view={view} items={items} loading={loading} reload={reload}/>}
+       <ResourceView view={view} items={items} loading={loading} reload={reload} access={access}/>}
     </main>
   </div>;
 }
@@ -182,7 +196,7 @@ function Login({onDone}:{onDone:()=>Promise<void>}){
     try{
       await api("/api/v1/auth/login",{method:"POST",body:JSON.stringify({username:f.get("username"),password:f.get("password")})});
       await onDone();
-      continueAuthorization();
+      await continueAuthorization();
     }catch(x){setError((x as Error).message)}finally{setBusy(false)}
   };
   return <Centered><section className="card auth"><h1>Sign in</h1><p>Use your OpenSSO local account.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit}><Field name="username" label="Username or email"/><Field name="password" label="Password" type="password"/><button disabled={busy}>{busy?"Signing in…":"Sign in"}</button></form></section></Centered>
@@ -283,7 +297,7 @@ function MyApplications({items,loading}:{items:Item[];loading:boolean}){
   if(loading)return <section className="card"><p>Loading applications…</p></section>;
   if(items.length===0)return <section className="card"><h2>No assigned applications</h2><p>Your account or groups do not currently have application assignments.</p></section>;
   return <div className="appGrid">{items.map(app=><section className="card appTile" key={String(app.id)}>
-    <h2>{String(app.name)}</h2><code>{String(app.client_id)}</code>
+    <h2>{String(app.name)}</h2><span className="protocolBadge">{String(app.protocol).toUpperCase()}</span><code>{String(app.identifier??app.client_id)}</code>
     {app.launch_url?<a className="buttonLink" href={String(app.launch_url)} rel="noreferrer">Launch application</a>:<span className="muted">No launch URL configured</span>}
   </section>)}</div>;
 }
@@ -329,7 +343,7 @@ function AuditView(){
   </>;
 }
 
-function ResourceView({view,items,loading,reload}:{view:View;items:Item[];loading:boolean;reload:()=>void}){
+function ResourceView({view,items,loading,reload,access}:{view:View;items:Item[];loading:boolean;reload:()=>void;access:Access|null}){
   const [query,setQuery]=useState("");
   const [page,setPage]=useState(1);
   const pageSize=25;
@@ -342,8 +356,13 @@ function ResourceView({view,items,loading,reload}:{view:View;items:Item[];loadin
   const pageItems=filtered.slice((page-1)*pageSize,page*pageSize);
   useEffect(()=>{if(page>pageCount)setPage(pageCount)},[page,pageCount]);
 
+  const canWriteApplications=hasPermission(access,"applications.write");
+  const canWriteSAML=hasPermission(access,"saml.write");
   return <>
-    <CreateForm view={view} onCreated={reload}/>
+    {view!=="applications"&&<CreateForm view={view} onCreated={reload}/>}
+    {view==="applications"&&canWriteApplications&&<CreateForm view={view} onCreated={reload}/>}
+    {view==="applications"&&canWriteSAML&&<SAMLCreateForm onCreated={reload}/>}
+    {view==="applications"&&hasPermission(access,"saml.read")&&<SAMLCertificatePanel canRotate={hasPermission(access,"saml.rotate")}/>} 
     {view==="sessions"&&<section className="toolbar"><button className="danger" onClick={()=>window.confirm("Revoke every active OpenSSO browser session?")&&void api("/api/v1/sessions/revoke-all",{method:"POST"}).then(reload)}>Revoke all sessions</button></section>}
     <section className="card tableCard">
       <div className="tableTools"><input placeholder="Search…" value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}}/><span>{filtered.length} records</span></div>
@@ -386,7 +405,9 @@ function GroupActions({group,reload}:{group:Item;reload:()=>void}){
 function ApplicationActions({app,reload}:{app:Item;reload:()=>void}){
   const [busy,setBusy]=useState(false),[details,setDetails]=useState<Item|null>(null),[assignments,setAssignments]=useState<{users:Item[];groups:Item[]}|null>(null);
   const id=String(app.id);
-  const loadDetails=async()=>{try{setDetails(await api(`/api/v1/applications/${id}/integration`))}catch(e){window.alert((e as Error).message)}};
+  const protocol=String(app.protocol||"oidc");
+  const integrationURL=protocol==="saml"?`/api/v1/saml/applications/${id}/integration`:`/api/v1/applications/${id}/integration`;
+  const loadDetails=async()=>{try{setDetails(await api(integrationURL))}catch(e){window.alert((e as Error).message)}};
   const loadAssignments=async()=>{try{setAssignments(await api(`/api/v1/applications/${id}/assignments`))}catch(e){window.alert((e as Error).message)}};
   const run=async(fn:()=>Promise<unknown>)=>{setBusy(true);try{await fn();reload()}catch(e){window.alert((e as Error).message)}finally{setBusy(false)}};
   const rotate=async()=>{if(!window.confirm("Rotate this client secret? Existing integrations using the old secret will stop working."))return;setBusy(true);try{const data=await api(`/api/v1/applications/${id}/rotate-secret`,{method:"POST"});window.alert(`New client secret — copy now:\n\n${data.client_secret}`)}catch(e){window.alert((e as Error).message)}finally{setBusy(false)}};
@@ -394,8 +415,9 @@ function ApplicationActions({app,reload}:{app:Item;reload:()=>void}){
   const assignGroup=()=>{const groupId=window.prompt("Group ID to assign:");if(groupId)void run(()=>api(`/api/v1/applications/${id}/assign/groups`,{method:"POST",body:JSON.stringify({group_id:groupId})})).then(loadAssignments)};
   const removeUser=async(userId:string)=>{await run(()=>api(`/api/v1/applications/${id}/assign/users/${userId}`,{method:"DELETE"}));await loadAssignments()};
   const removeGroup=async(groupId:string)=>{await run(()=>api(`/api/v1/applications/${id}/assign/groups/${groupId}`,{method:"DELETE"}));await loadAssignments()};
-  const edit=async(toggleOnly=false)=>{
-    const d=details??await api(`/api/v1/applications/${id}/integration`);
+
+  const editOIDC=async(toggleOnly=false)=>{
+    const d=details??await api(integrationURL);
     const name=toggleOnly?String(app.name):window.prompt("Application name:",String(app.name??""));
     if(!name)return;
     const initiate=toggleOnly?String(app.initiate_login_uri??""):window.prompt("Initiate login URI:",String(d.initiate_login_uri??""))??"";
@@ -404,10 +426,68 @@ function ApplicationActions({app,reload}:{app:Item;reload:()=>void}){
       redirect_uris:d.redirect_uris||[],post_logout_redirect_uris:d.post_logout_redirect_uris||[],allowed_scopes:d.scopes||[]
     })}));
   };
-  return <div className="actionPanel"><div className="actions"><button className="secondary" onClick={()=>void loadDetails()}>Integration</button><button className="secondary" onClick={()=>void edit(false)}>Edit</button><button className="secondary" onClick={()=>void edit(true)}>{app.enabled?"Disable":"Enable"}</button>{!app.public_client&&<button disabled={busy} className="secondary" onClick={()=>void rotate()}>Rotate secret</button>}<button className="secondary" onClick={assignUser}>Assign user</button><button className="secondary" onClick={assignGroup}>Assign group</button><button className="secondary" onClick={()=>void loadAssignments()}>Assignments</button></div>
-    {details&&<div className="details"><strong>Integration details</strong><code>Issuer: {String(details.issuer)}</code><code>Client ID: {String(details.client_id)}</code><code>Authorize: {String(details.authorization_url)}</code><code>Token: {String(details.token_url)}</code><code>JWKS: {String(details.jwks_url)}</code><code>Redirects: {render(details.redirect_uris)}</code><code>Scopes: {render(details.scopes)}</code><span>Client secret is never retrievable after creation or rotation.</span></div>}
+
+  const editSAML=async(toggleOnly=false)=>{
+    const d=details??await api(integrationURL);
+    const name=toggleOnly?String(app.name):window.prompt("Application name:",String(app.name??""));
+    if(!name)return;
+    const initiate=toggleOnly?String(app.initiate_login_uri??""):window.prompt("Launch / initiate-login URI:",String(d.initiate_login_uri??""))??"";
+    const metadata=toggleOnly?String(d.sp_metadata_xml??""):window.prompt("Service Provider metadata XML:",String(d.sp_metadata_xml??""));
+    if(metadata===null||metadata==="")return;
+    await run(()=>api(`/api/v1/saml/applications/${id}`,{method:"PUT",body:JSON.stringify({
+      name,enabled:toggleOnly?!Boolean(app.enabled):Boolean(app.enabled),
+      initiate_login_uri:initiate,metadata_xml:metadata,
+      require_signed_authn_request:Boolean(d.require_signed_authn_request)
+    })}));
+  };
+
+  const edit=(toggleOnly=false)=>protocol==="saml"?editSAML(toggleOnly):editOIDC(toggleOnly);
+
+  return <div className="actionPanel"><div className="actions">
+    <button className="secondary" onClick={()=>void loadDetails()}>Integration</button>
+    <button className="secondary" onClick={()=>void edit(false)}>Edit</button>
+    <button className="secondary" onClick={()=>void edit(true)}>{app.enabled?"Disable":"Enable"}</button>
+    {protocol==="oidc"&&!app.public_client&&<button disabled={busy} className="secondary" onClick={()=>void rotate()}>Rotate secret</button>}
+    <button className="secondary" onClick={assignUser}>Assign user</button>
+    <button className="secondary" onClick={assignGroup}>Assign group</button>
+    <button className="secondary" onClick={()=>void loadAssignments()}>Assignments</button>
+  </div>
+    {details&&protocol==="oidc"&&<div className="details"><strong>OIDC integration</strong><code>Issuer: {String(details.issuer)}</code><code>Client ID: {String(details.client_id)}</code><code>Authorize: {String(details.authorization_url)}</code><code>Token: {String(details.token_url)}</code><code>JWKS: {String(details.jwks_url)}</code><code>Redirects: {render(details.redirect_uris)}</code><code>Scopes: {render(details.scopes)}</code><span>Client secret is never retrievable after creation or rotation.</span></div>}
+    {details&&protocol==="saml"&&<div className="details"><strong>SAML integration</strong><code>IdP Entity ID: {String(details.idp_entity_id)}</code><code>IdP metadata: {String(details.idp_metadata_url)}</code><code>SSO URL: {String(details.sso_url)}</code><code>SP Entity ID: {String(details.sp_entity_id)}</code><code>NameID: {String(details.name_id_format)}</code><code>Request binding: {String(details.request_binding)}</code><code>Response binding: {String(details.response_binding)}</code><span>AuthnRequest signature required: {String(details.require_signed_authn_request)}</span></div>}
     {assignments&&<div className="details"><strong>Assignments</strong>{assignments.users.map(u=><div className="detailRow" key={String(u.id)}><span>User: {String(u.username)}</span><button className="danger compact" onClick={()=>void removeUser(String(u.id))}>Remove</button></div>)}{assignments.groups.map(g=><div className="detailRow" key={String(g.id)}><span>Group: {String(g.name)}</span><button className="danger compact" onClick={()=>void removeGroup(String(g.id))}>Remove</button></div>)}</div>}
   </div>;
+}
+
+function SAMLCreateForm({onCreated}:{onCreated:()=>void}){
+  const [busy,setBusy]=useState(false),[error,setError]=useState("");
+  const submit=async(e:FormEvent<HTMLFormElement>)=>{
+    e.preventDefault();setBusy(true);setError("");const f=new FormData(e.currentTarget);
+    try{
+      await api("/api/v1/saml/applications",{method:"POST",body:JSON.stringify({
+        name:f.get("saml_name"),
+        initiate_login_uri:f.get("saml_initiate_login_uri"),
+        metadata_xml:f.get("saml_metadata_xml"),
+        require_signed_authn_request:f.get("saml_require_signed")==="on"
+      })});
+      e.currentTarget.reset();onCreated();
+    }catch(x){setError((x as Error).message)}finally{setBusy(false)}
+  };
+  return <section className="card create"><h2>Create SAML application</h2><p>Paste the Service Provider metadata. OpenSSO validates the Entity ID and requires an HTTP-POST ACS endpoint.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit} className="stack">
+    <Field name="saml_name" label="Application name"/>
+    <Field name="saml_initiate_login_uri" label="Launch / initiate-login URI" required={false}/>
+    <TextArea name="saml_metadata_xml" label="Service Provider metadata XML" rows={10}/>
+    <label className="check"><input name="saml_require_signed" type="checkbox"/> Require signed AuthnRequests</label>
+    <button disabled={busy}>{busy?"Saving…":"Create SAML application"}</button>
+  </form></section>;
+}
+
+function SAMLCertificatePanel({canRotate}:{canRotate:boolean}){
+  const [items,setItems]=useState<Item[]>([]),[error,setError]=useState(""),[busy,setBusy]=useState(false);
+  const load=async()=>{try{const data=await api("/api/v1/saml/certificates");setItems(data.items||[])}catch(e){setError((e as Error).message)}};
+  useEffect(()=>{void load()},[]);
+  const rotate=async()=>{if(!window.confirm("Rotate the active SAML signing certificate? Existing metadata consumers must refresh the IdP metadata."))return;setBusy(true);setError("");try{const data=await api("/api/v1/saml/certificates/rotate",{method:"POST"});setItems(data.items||[])}catch(e){setError((e as Error).message)}finally{setBusy(false)}};
+  const active=items.find(x=>Boolean(x.active));
+  return <section className="card create"><h2>SAML signing certificate</h2>{error&&<ErrorBox text={error}/>}<p>{active?`Active certificate ${active.kid}, expires ${active.not_after}`:"No certificate metadata loaded."}</p>{canRotate&&<button className="secondary" disabled={busy} onClick={()=>void rotate()}>{busy?"Rotating…":"Rotate certificate"}</button>}</section>;
 }
 
 function SessionActions({session,reload}:{session:Item;reload:()=>void}){
@@ -437,7 +517,7 @@ function CreateForm({view,onCreated}:{view:View;onCreated:()=>void}){
       e.currentTarget.reset();onCreated();
     }catch(x){setError((x as Error).message)}finally{setBusy(false)}
   };
-  return <section className="card create"><h2>{view==="roles"?"Assign role":`Create ${view.slice(0,-1)}`}</h2>{error&&<ErrorBox text={error}/>}
+  return <section className="card create"><h2>{view==="roles"?"Assign role":view==="applications"?"Create OIDC application":`Create ${view.slice(0,-1)}`}</h2>{error&&<ErrorBox text={error}/>}
     {secret&&<div className="secret"><strong>Client secret — copy now</strong><code>{secret}</code><span>It will not be shown again.</span></div>}
     <form onSubmit={submit} className="inlineForm">
       {view==="users"&&<><Field name="username" label="Username"/><Field name="email" label="Email" type="email"/><Field name="display_name" label="Display name"/><Field name="password" label="Temporary password (must meet policy)" type="password" minLength={12}/></>}
@@ -450,18 +530,19 @@ function CreateForm({view,onCreated}:{view:View;onCreated:()=>void}){
 }
 
 function Field({name,label,type="text",minLength,required=true,defaultValue}:{name:string;label:string;type?:string;minLength?:number;required?:boolean;defaultValue?:string}){return <label><span>{label}</span><input required={required} name={name} type={type} minLength={minLength} defaultValue={defaultValue}/></label>}
+function TextArea({name,label,rows=6}:{name:string;label:string;rows?:number}){return <label><span>{label}</span><textarea required name={name} rows={rows}/></label>}
 function NumberField({name,label,value,min,max}:{name:string;label:string;value:number;min:number;max:number}){return <label><span>{label}</span><input required name={name} type="number" defaultValue={value} min={min} max={max}/></label>}
 function CheckField({name,label,checked}:{name:string;label:string;checked:boolean}){return <label className="check policyCheck"><input name={name} type="checkbox" defaultChecked={checked}/><span>{label}</span></label>}
 function ErrorBox({text}:{text:string}){return <div className="error" role="alert">{text}</div>}
 function Centered({children}:{children:React.ReactNode}){return <div className="centered">{children}</div>}
 function render(v:unknown){if(Array.isArray(v))return v.join(", ");if(typeof v==="boolean")return v?"Yes":"No";if(v==null||v==="")return "—";return String(v)}
 function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile"})[v]}
-function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC relying parties and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials"})[v]}
+function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials"})[v]}
 function columns(v:View){return ({
   users:["id","username","email","display_name","active","must_change_password","locked_until","created_at"],
   groups:["id","name","description","created_at"],
   roles:["id","name","description"],
-  applications:["id","name","client_id","public_client","enabled","initiate_login_uri","allowed_scopes","created_at"],
+  applications:["id","name","protocol","client_id","entity_id","enabled","initiate_login_uri","created_at"],
   sessions:["id","username","ip","user_agent","last_seen_at","expires_at"],
   audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"],
   dashboard:[],security:[],profile:[],"my-apps":[],"my-sessions":[]
