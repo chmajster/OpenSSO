@@ -13,6 +13,7 @@ import (
 	"github.com/chmajster/OpenSSO/backend/internal/database"
 	"github.com/chmajster/OpenSSO/backend/internal/httpapi"
 	"github.com/chmajster/OpenSSO/backend/internal/oidc"
+	"github.com/chmajster/OpenSSO/backend/internal/samlidp"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -50,7 +51,18 @@ func main() {
 		log.Error("signing key initialization failed", "error", e)
 		os.Exit(1)
 	}
-	s := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.New(cfg, db, rdb, log, keys).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second}
+	samlCertificates := samlidp.NewCertificateManager(db, cfg.MasterKey)
+	if _, e = samlCertificates.Active(ctx); e != nil {
+		log.Error("SAML signing certificate initialization failed", "error", e)
+		os.Exit(1)
+	}
+	samlStorage := samlidp.NewStorage(db, samlCertificates, cfg.PublicURL+"/")
+	samlRuntime, e := samlidp.NewRuntime(cfg, samlStorage, samlCertificates)
+	if e != nil {
+		log.Error("SAML provider initialization failed", "error", e)
+		os.Exit(1)
+	}
+	s := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.New(cfg, db, rdb, log, keys, samlRuntime).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second}
 	go func() {
 		log.Info("OpenSSO listening", "address", cfg.ListenAddr)
 		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
