@@ -84,7 +84,7 @@ func (s *Server) createSAMLApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{
 		"id": id, "protocol": "saml", "entity_id": entityID,
 		"require_signed_authn_request": in.RequireSignedAuthnRequest,
-		"initiate_login_uri": in.InitiateLoginURI,
+		"initiate_login_uri":           in.InitiateLoginURI,
 	})
 }
 
@@ -157,7 +157,7 @@ func (s *Server) updateSAMLApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"id": id, "protocol": "saml", "entity_id": entityID, "enabled": in.Enabled,
 		"require_signed_authn_request": in.RequireSignedAuthnRequest,
-		"initiate_login_uri": in.InitiateLoginURI,
+		"initiate_login_uri":           in.InitiateLoginURI,
 	})
 }
 
@@ -191,8 +191,8 @@ func (s *Server) samlApplicationIntegration(w http.ResponseWriter, r *http.Reque
 		"sso_url":                      strings.TrimRight(s.cfg.PublicURL, "/") + "/saml/sso",
 		"certificate_url":              strings.TrimRight(s.cfg.PublicURL, "/") + "/saml/certificate",
 		"name_id_format":               "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
-		"request_binding":               "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
-		"response_binding":              "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+		"request_binding":              "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+		"response_binding":             "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
 	})
 }
 

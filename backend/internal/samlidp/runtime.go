@@ -10,8 +10,8 @@ import (
 
 	"github.com/chmajster/OpenSSO/backend/internal/config"
 	"github.com/zitadel/saml/pkg/provider"
-	"github.com/zitadel/saml/pkg/provider/signature"
 	"github.com/zitadel/saml/pkg/provider/serviceprovider"
+	"github.com/zitadel/saml/pkg/provider/signature"
 	samlxml "github.com/zitadel/saml/pkg/provider/xml"
 	"github.com/zitadel/saml/pkg/provider/xml/md"
 )

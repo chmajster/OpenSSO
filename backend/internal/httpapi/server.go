@@ -523,17 +523,17 @@ func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items = append(items, map[string]any{
-			"id": id,
-			"name": name,
-			"protocol": protocol,
-			"enabled": enabled,
-			"client_id": clientID,
-			"entity_id": entityID,
-			"public_client": publicClient,
-			"require_pkce": requirePKCE,
-			"allowed_scopes": scopes,
+			"id":                 id,
+			"name":               name,
+			"protocol":           protocol,
+			"enabled":            enabled,
+			"client_id":          clientID,
+			"entity_id":          entityID,
+			"public_client":      publicClient,
+			"require_pkce":       requirePKCE,
+			"allowed_scopes":     scopes,
 			"initiate_login_uri": initiateLoginURI,
-			"created_at": created,
+			"created_at":         created,
 		})
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
