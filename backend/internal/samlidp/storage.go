@@ -121,7 +121,7 @@ func (s *Storage) CreateAuthRequest(
 	relayState string,
 	applicationID string,
 ) (models.AuthRequestInt, error) {
-	if request == nil || request.Id == "" || request.Issuer.Text == "" {
+	if request == nil || request.Id == "" || request.Issuer == nil || strings.TrimSpace(request.Issuer.Text) == "" {
 		return nil, errors.New("invalid SAML AuthnRequest")
 	}
 	if len(relayState) > 1024 {
