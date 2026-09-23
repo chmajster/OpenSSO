@@ -1,11 +1,14 @@
 package mfa
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base32"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"image/png"
 	"strings"
 	"time"
 
@@ -43,6 +46,7 @@ type Status struct {
 type TOTPEnrollment struct {
 	Secret        string   `json:"secret"`
 	OTPAuthURL    string   `json:"otpauth_url"`
+	QRCodeDataURL string   `json:"qr_code_data_url"`
 	RecoveryCodes []string `json:"recovery_codes,omitempty"`
 }
 
@@ -148,7 +152,19 @@ func (s *Service) BeginTOTP(ctx context.Context, userID, accountName string) (TO
 	if err != nil {
 		return TOTPEnrollment{}, err
 	}
-	return TOTPEnrollment{Secret: key.Secret(), OTPAuthURL: key.URL()}, nil
+	image, err := key.Image(240, 240)
+	if err != nil {
+		return TOTPEnrollment{}, err
+	}
+	var pngBuffer bytes.Buffer
+	if err = png.Encode(&pngBuffer, image); err != nil {
+		return TOTPEnrollment{}, err
+	}
+	return TOTPEnrollment{
+		Secret: key.Secret(),
+		OTPAuthURL: key.URL(),
+		QRCodeDataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBuffer.Bytes()),
+	}, nil
 }
 
 func (s *Service) ConfirmTOTP(ctx context.Context, userID, code string) ([]string, error) {
