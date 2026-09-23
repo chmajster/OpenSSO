@@ -245,7 +245,7 @@ func (s *Storage) FinalizeAuthRequest(ctx context.Context, requestKey, userID st
 		return "", err
 	}
 	if !allowed {
-		return "", ErrAccessDenied
+		return applicationID, ErrAccessDenied
 	}
 
 	tag, err := tx.Exec(ctx, `
