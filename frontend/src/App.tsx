@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Item = Record<string, unknown>;
 type View =
-  | "my-apps" | "my-sessions" | "profile"
+  | "my-apps" | "my-sessions" | "profile" | "mfa"
   | "dashboard" | "users" | "groups" | "roles" | "applications"
   | "sessions" | "security" | "audit";
 
@@ -13,6 +13,9 @@ type Me = {
   user_id?: string;
   username?: string;
   must_change_password?: boolean;
+  mfa_verified?: boolean;
+  mfa_required?: boolean;
+  mfa_enrollment_required?: boolean;
 };
 
 type Access = { roles:string[]; permissions:string[] };
@@ -80,9 +83,14 @@ export default function App(){
     setInitialized(Boolean(status.initialized));
     if(!status.initialized)return;
     try{
-      const current=await api("/api/v1/me");
-      const currentAccess:Access=await api("/api/v1/me/access");
+      const current:Me=await api("/api/v1/me");
       setMe(current);
+      const forceMFA=new URLSearchParams(window.location.search).get("mfa")==="required";
+      if(current.must_change_password || ((current.mfa_required || forceMFA) && !current.mfa_verified)){
+        setAccess(null);
+        return;
+      }
+      const currentAccess:Access=await api("/api/v1/me/access");
       setAccess(currentAccess);
       setView(v=>v==="my-apps"?defaultView(currentAccess):v);
     }catch{
@@ -119,6 +127,8 @@ export default function App(){
   if(!initialized)return <Bootstrap onDone={refreshSession}/>;
   if(!me)return <Login onDone={refreshSession}/>;
   if(Boolean(me.MustChangePassword ?? me.must_change_password))return <ChangePassword onDone={refreshSession}/>;
+  const forceMFA=new URLSearchParams(window.location.search).get("mfa")==="required";
+  if((Boolean(me.mfa_required)||forceMFA) && !Boolean(me.mfa_verified))return <MFAChallenge onDone={refreshSession}/>;
 
   const logout=async()=>{await api("/api/v1/auth/logout",{method:"POST"});setMe(null);setAccess(null)};
   const reload=()=>setReloadKey(x=>x+1);
@@ -141,6 +151,7 @@ export default function App(){
       {view==="dashboard"?<Dashboard data={dashboard} loading={loading}/>:
        view==="security"?<SecurityPolicy data={policy} loading={loading} onSaved={reload}/>:
        view==="profile"?<ProfileView data={profile} loading={loading} onSaved={reload}/>:
+       view==="mfa"?<MFASettings/>:
        view==="audit"?<AuditView/>:
        view==="my-apps"?<MyApplications items={items} loading={loading}/>:
        view==="my-sessions"?<MySessions items={items} loading={loading} reload={reload}/>:
@@ -150,7 +161,7 @@ export default function App(){
 }
 
 function navigation(access:Access|null):View[]{
-  const result:View[]=["my-apps","my-sessions","profile"];
+  const result:View[]=["my-apps","mfa","my-sessions","profile"];
   if(hasPermission(access,"users.read"))result.push("dashboard","users");
   if(hasPermission(access,"groups.read"))result.push("groups");
   if(hasPermission(access,"users.read"))result.push("roles");
@@ -224,7 +235,8 @@ function SecurityPolicy({data,loading,onSaved}:{data:Item;loading:boolean;onSave
         password_require_digit:f.get("password_require_digit")==="on",
         password_require_symbol:f.get("password_require_symbol")==="on",
         lockout_threshold:Number(f.get("lockout_threshold")),
-        lockout_minutes:Number(f.get("lockout_minutes")),session_ttl_minutes:Number(f.get("session_ttl_minutes"))
+        lockout_minutes:Number(f.get("lockout_minutes")),session_ttl_minutes:Number(f.get("session_ttl_minutes")),
+        mfa_required:f.get("mfa_required")==="on"
       })});
       onSaved();
     }catch(x){setError((x as Error).message)}finally{setBusy(false)}
@@ -238,6 +250,7 @@ function SecurityPolicy({data,loading,onSaved}:{data:Item;loading:boolean;onSave
     <NumberField name="lockout_threshold" label="Failed attempts before lockout" value={Number(data.lockout_threshold??10)} min={3} max={100}/>
     <NumberField name="lockout_minutes" label="Lockout minutes" value={Number(data.lockout_minutes??15)} min={1} max={1440}/>
     <NumberField name="session_ttl_minutes" label="Session TTL minutes" value={Number(data.session_ttl_minutes??720)} min={5} max={10080}/>
+    <CheckField name="mfa_required" label="Require MFA globally" checked={Boolean(data.mfa_required)}/>
     <button disabled={busy}>{busy?"Saving…":"Save policy"}</button>
   </form></section>
 }
@@ -455,8 +468,8 @@ function CheckField({name,label,checked}:{name:string;label:string;checked:boole
 function ErrorBox({text}:{text:string}){return <div className="error" role="alert">{text}</div>}
 function Centered({children}:{children:React.ReactNode}){return <div className="centered">{children}</div>}
 function render(v:unknown){if(Array.isArray(v))return v.join(", ");if(typeof v==="boolean")return v?"Yes":"No";if(v==null||v==="")return "—";return String(v)}
-function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile"})[v]}
-function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC relying parties and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials"})[v]}
+function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile",mfa:"MFA"})[v]}
+function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC relying parties and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials",mfa:"Authenticator, passkeys, security keys and recovery codes"})[v]}
 function columns(v:View){return ({
   users:["id","username","email","display_name","active","must_change_password","locked_until","created_at"],
   groups:["id","name","description","created_at"],
@@ -464,5 +477,5 @@ function columns(v:View){return ({
   applications:["id","name","client_id","public_client","enabled","initiate_login_uri","allowed_scopes","created_at"],
   sessions:["id","username","ip","user_agent","last_seen_at","expires_at"],
   audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"],
-  dashboard:[],security:[],profile:[],"my-apps":[],"my-sessions":[]
+  dashboard:[],security:[],profile:[],mfa:[],"my-apps":[],"my-sessions":[]
 })[v]||[]}
