@@ -6,6 +6,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/redis/go-redis/v9 v9.14.0
+	github.com/zitadel/saml v0.4.2-0.20260820134929-806d67dd5324
 	golang.org/x/crypto v0.42.0
 )
 
