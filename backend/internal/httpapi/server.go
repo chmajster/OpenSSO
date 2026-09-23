@@ -14,6 +14,7 @@ import (
 
 	"github.com/chmajster/OpenSSO/backend/internal/config"
 	"github.com/chmajster/OpenSSO/backend/internal/oidc"
+	"github.com/chmajster/OpenSSO/backend/internal/samlidp"
 	"github.com/chmajster/OpenSSO/backend/internal/security"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,6 +27,7 @@ type Server struct {
 	redis *redis.Client
 	log   *slog.Logger
 	keys  *oidc.KeyManager
+	saml  *samlidp.Runtime
 }
 type principal struct {
 	UserID, Username   string
@@ -36,8 +38,8 @@ type contextKey string
 const principalKey contextKey = "principal"
 const requestIDKey contextKey = "request_id"
 
-func New(cfg config.Config, db *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, keys *oidc.KeyManager) *Server {
-	return &Server{cfg: cfg, db: db, redis: rdb, log: log, keys: keys}
+func New(cfg config.Config, db *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, keys *oidc.KeyManager, saml *samlidp.Runtime) *Server {
+	return &Server{cfg: cfg, db: db, redis: rdb, log: log, keys: keys, saml: saml}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -55,6 +57,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /userinfo", s.userinfo)
 	m.HandleFunc("GET /oauth2/logout", s.oauthLogout)
 	m.HandleFunc("POST /oauth2/logout", s.oauthLogout)
+	if s.saml != nil {
+		m.Handle("/saml/", s.saml.Handler())
+	}
 	m.HandleFunc("GET /api/v1/setup/status", s.setupStatus)
 	m.HandleFunc("POST /api/v1/setup/bootstrap", s.bootstrap)
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -105,6 +110,12 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("PUT /api/v1/security/policy", s.require("policies.write", s.updateSecurityPolicy))
 	m.HandleFunc("GET /api/v1/signing-keys", s.require("signing_keys.read", s.listSigningKeys))
 	m.HandleFunc("POST /api/v1/signing-keys/rotate", s.require("signing_keys.rotate", s.rotateSigningKey))
+	m.HandleFunc("POST /api/v1/saml/applications", s.require("saml.write", s.createSAMLApplication))
+	m.HandleFunc("PUT /api/v1/saml/applications/{id}", s.require("saml.write", s.updateSAMLApplication))
+	m.HandleFunc("GET /api/v1/saml/applications/{id}/integration", s.require("saml.read", s.samlApplicationIntegration))
+	m.HandleFunc("GET /api/v1/saml/certificates", s.require("saml.read", s.samlCertificates))
+	m.HandleFunc("POST /api/v1/saml/certificates/rotate", s.require("saml.rotate", s.rotateSAMLCertificate))
+	m.HandleFunc("POST /api/v1/saml/continue", s.withPrincipal(s.continueSAML))
 	return s.middleware(m)
 }
 
