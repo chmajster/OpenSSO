@@ -151,6 +151,10 @@ func (r *Runtime) metadata(w http.ResponseWriter, req *http.Request) {
 	}
 	// Do not advertise protocol surfaces OpenSSO does not expose yet.
 	idpMetadata.SingleLogoutService = nil
+	idpMetadata.SingleSignOnService = []md.EndpointType{{
+		Binding:  provider.RedirectBinding,
+		Location: strings.TrimRight(r.issuer, "/") + "/sso",
+	}}
 	idpMetadata.NameIDFormat = []string{
 		"urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
 	}
