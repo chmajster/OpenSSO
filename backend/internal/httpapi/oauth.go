@@ -139,7 +139,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var granted []string
-	err := s.db.QueryRow(r.Context(), `SELECT granted_scopes FROM oauth_consents WHERE user_id=$1 AND application_id=$2`, p.UserID, client.ApplicationID).Scan(&granted)
+	err = s.db.QueryRow(r.Context(), `SELECT granted_scopes FROM oauth_consents WHERE user_id=$1 AND application_id=$2`, p.UserID, client.ApplicationID).Scan(&granted)
 	if err == nil && containsAll(granted, scopes) {
 		code, err := s.storeAuthorizationCode(r.Context(), client.ApplicationID, p.UserID, redirectURI, scope, nonce, challenge)
 		if err != nil {
