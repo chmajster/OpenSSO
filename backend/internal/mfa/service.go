@@ -255,6 +255,17 @@ func (s *Service) totpSecret(ctx context.Context, userID string, activeOnly bool
 	return string(secret), nil
 }
 
+func (s *Service) EnsureRecoveryCodes(ctx context.Context, userID string) ([]string, error) {
+	var unused int
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM mfa_recovery_codes WHERE user_id=$1 AND used_at IS NULL`, userID).Scan(&unused); err != nil {
+		return nil, err
+	}
+	if unused > 0 {
+		return nil, nil
+	}
+	return s.RegenerateRecoveryCodes(ctx, userID)
+}
+
 func (s *Service) RegenerateRecoveryCodes(ctx context.Context, userID string) ([]string, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
