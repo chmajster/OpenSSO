@@ -3,14 +3,28 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/chmajster/OpenSSO/backend/internal/samlidp"
 )
 
+func validateSAMLInitiateLoginURI(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Fragment != "" {
+		return errors.New("invalid initiate_login_uri")
+	}
+	return nil
+}
+
 func (s *Server) createSAMLApplication(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name                      string `json:"name"`
+		InitiateLoginURI          string `json:"initiate_login_uri"`
 		MetadataXML               string `json:"metadata_xml"`
 		RequireSignedAuthnRequest bool   `json:"require_signed_authn_request"`
 	}
@@ -18,8 +32,13 @@ func (s *Server) createSAMLApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Name = strings.TrimSpace(in.Name)
+	in.InitiateLoginURI = strings.TrimSpace(in.InitiateLoginURI)
 	if in.Name == "" {
 		problem(w, 400, "application name is required")
+		return
+	}
+	if err := validateSAMLInitiateLoginURI(in.InitiateLoginURI); err != nil {
+		problem(w, 400, err.Error())
 		return
 	}
 	entityID, err := samlidp.ValidateServiceProviderMetadata(in.MetadataXML)
@@ -46,9 +65,9 @@ func (s *Server) createSAMLApplication(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err = tx.Exec(r.Context(), `
 		INSERT INTO saml_service_providers(
-			application_id,entity_id,metadata_xml,require_signed_authn_requests
-		) VALUES($1,$2,$3,$4)
-	`, id, entityID, in.MetadataXML, in.RequireSignedAuthnRequest); err != nil {
+			application_id,entity_id,metadata_xml,require_signed_authn_requests,initiate_login_uri
+		) VALUES($1,$2,$3,$4,NULLIF($5,''))
+	`, id, entityID, in.MetadataXML, in.RequireSignedAuthnRequest, in.InitiateLoginURI); err != nil {
 		problem(w, 409, "SAML entityID already exists or metadata cannot be stored")
 		return
 	}
@@ -65,6 +84,7 @@ func (s *Server) createSAMLApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{
 		"id": id, "protocol": "saml", "entity_id": entityID,
 		"require_signed_authn_request": in.RequireSignedAuthnRequest,
+		"initiate_login_uri": in.InitiateLoginURI,
 	})
 }
 
@@ -73,6 +93,7 @@ func (s *Server) updateSAMLApplication(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name                      string `json:"name"`
 		Enabled                   bool   `json:"enabled"`
+		InitiateLoginURI          string `json:"initiate_login_uri"`
 		MetadataXML               string `json:"metadata_xml"`
 		RequireSignedAuthnRequest bool   `json:"require_signed_authn_request"`
 	}
@@ -80,8 +101,13 @@ func (s *Server) updateSAMLApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Name = strings.TrimSpace(in.Name)
+	in.InitiateLoginURI = strings.TrimSpace(in.InitiateLoginURI)
 	if in.Name == "" {
 		problem(w, 400, "application name is required")
+		return
+	}
+	if err := validateSAMLInitiateLoginURI(in.InitiateLoginURI); err != nil {
+		problem(w, 400, err.Error())
 		return
 	}
 	entityID, err := samlidp.ValidateServiceProviderMetadata(in.MetadataXML)
@@ -111,9 +137,10 @@ func (s *Server) updateSAMLApplication(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err = tx.Exec(r.Context(), `
 		UPDATE saml_service_providers
-		SET entity_id=$1,metadata_xml=$2,require_signed_authn_requests=$3,updated_at=now()
-		WHERE application_id=$4
-	`, entityID, in.MetadataXML, in.RequireSignedAuthnRequest, id); err != nil {
+		SET entity_id=$1,metadata_xml=$2,require_signed_authn_requests=$3,
+		    initiate_login_uri=NULLIF($4,''),updated_at=now()
+		WHERE application_id=$5
+	`, entityID, in.MetadataXML, in.RequireSignedAuthnRequest, in.InitiateLoginURI, id); err != nil {
 		problem(w, 409, "SAML entityID already exists or update failed")
 		return
 	}
@@ -130,6 +157,7 @@ func (s *Server) updateSAMLApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"id": id, "protocol": "saml", "entity_id": entityID, "enabled": in.Enabled,
 		"require_signed_authn_request": in.RequireSignedAuthnRequest,
+		"initiate_login_uri": in.InitiateLoginURI,
 	})
 }
 
@@ -137,30 +165,34 @@ func (s *Server) samlApplicationIntegration(w http.ResponseWriter, r *http.Reque
 	id := r.PathValue("id")
 	var name, entityID, metadataXML string
 	var enabled, requireSigned bool
+	var initiateLoginURI *string
 	err := s.db.QueryRow(r.Context(), `
-		SELECT a.name,a.enabled,sp.entity_id,sp.metadata_xml,sp.require_signed_authn_requests
+		SELECT a.name,a.enabled,sp.entity_id,sp.metadata_xml,
+		       sp.require_signed_authn_requests,sp.initiate_login_uri
 		FROM applications a
 		JOIN saml_service_providers sp ON sp.application_id=a.id
 		WHERE a.id=$1 AND a.protocol='saml'
-	`, id).Scan(&name, &enabled, &entityID, &metadataXML, &requireSigned)
+	`, id).Scan(&name, &enabled, &entityID, &metadataXML, &requireSigned, &initiateLoginURI)
 	if err != nil {
 		problem(w, 404, "SAML application not found")
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"id": id,
-		"name": name,
-		"protocol": "saml",
-		"enabled": enabled,
-		"sp_entity_id": entityID,
-		"sp_metadata_xml": metadataXML,
+		"id":                           id,
+		"name":                         name,
+		"protocol":                     "saml",
+		"enabled":                      enabled,
+		"sp_entity_id":                 entityID,
+		"sp_metadata_xml":              metadataXML,
 		"require_signed_authn_request": requireSigned,
-		"idp_entity_id": s.saml.EntityID(),
-		"idp_metadata_url": strings.TrimRight(s.cfg.PublicURL, "/") + "/saml/metadata",
-		"sso_url": strings.TrimRight(s.cfg.PublicURL, "/") + "/saml/sso",
-		"certificate_url": strings.TrimRight(s.cfg.PublicURL, "/") + "/saml/certificate",
-		"name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
-		"response_binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+		"initiate_login_uri":           initiateLoginURI,
+		"idp_entity_id":                s.saml.EntityID(),
+		"idp_metadata_url":             strings.TrimRight(s.cfg.PublicURL, "/") + "/saml/metadata",
+		"sso_url":                      strings.TrimRight(s.cfg.PublicURL, "/") + "/saml/sso",
+		"certificate_url":              strings.TrimRight(s.cfg.PublicURL, "/") + "/saml/certificate",
+		"name_id_format":               "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+		"request_binding":               "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+		"response_binding":              "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
 	})
 }
 
