@@ -5,3 +5,5 @@
 @media(max-width:700px){.tableTools{align-items:stretch;flex-direction:column}.tableTools input{max-width:none}.pager{justify-content:space-between}.actionPanel{min-width:220px}}
 
 .policyCheck{align-content:center;min-height:44px}.policyCheck input{width:auto;margin:0}.policyCheck span{color:#c9d5e8}
+
+textarea,select{font:inherit;width:100%;border:1px solid #314563;border-radius:10px;background:#0d1526;color:#f4f7fb;padding:.72rem .8rem}textarea{resize:vertical;min-height:120px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.82rem;line-height:1.45}.protocolBadge{display:inline-block;width:max-content;padding:.25rem .5rem;border:1px solid #314563;border-radius:999px;color:#9db0ca;font-size:.72rem;font-weight:700;letter-spacing:.05em}
