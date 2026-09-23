@@ -12,6 +12,7 @@ import (
 	"github.com/chmajster/OpenSSO/backend/internal/config"
 	"github.com/chmajster/OpenSSO/backend/internal/database"
 	"github.com/chmajster/OpenSSO/backend/internal/httpapi"
+	"github.com/chmajster/OpenSSO/backend/internal/mfa"
 	"github.com/chmajster/OpenSSO/backend/internal/oidc"
 	"github.com/redis/go-redis/v9"
 )
@@ -45,12 +46,17 @@ func main() {
 		log.Error("redis startup failed", "error", e)
 		os.Exit(1)
 	}
+	mfaService, e := mfa.NewService(db, rdb, cfg.MasterKey, cfg.PublicURL)
+	if e != nil {
+		log.Error("MFA initialization failed", "error", e)
+		os.Exit(1)
+	}
 	keys := oidc.NewKeyManager(db, cfg.MasterKey)
 	if _, e = keys.Active(ctx); e != nil {
 		log.Error("signing key initialization failed", "error", e)
 		os.Exit(1)
 	}
-	s := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.New(cfg, db, rdb, log, keys).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second}
+	s := &http.Server{Addr: cfg.ListenAddr, Handler: httpapi.New(cfg, db, rdb, log, keys, mfaService).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second}
 	go func() {
 		log.Info("OpenSSO listening", "address", cfg.ListenAddr)
 		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
