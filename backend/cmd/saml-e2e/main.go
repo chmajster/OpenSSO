@@ -490,7 +490,7 @@ func validateResponse(
 	response *samlp.ResponseType,
 	requestID, idpEntityID, spEntityID, acsURL, username string,
 ) error {
-	if response == nil || response.Assertion == nil {
+	if response == nil || response.Assertion.Id == "" {
 		return errors.New("SAML response/assertion missing")
 	}
 	if response.Status.StatusCode.Value != "urn:oasis:names:tc:SAML:2.0:status:Success" {
