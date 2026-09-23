@@ -1,6 +1,6 @@
 module github.com/chmajster/OpenSSO/backend
 
-go 1.26.0
+go 1.26.6
 
 require (
 	github.com/go-webauthn/webauthn v0.18.2
