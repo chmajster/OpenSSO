@@ -137,7 +137,7 @@ export default function App(){
        view==="audit"?<AuditView/>:
        view==="my-apps"?<MyApplications items={items} loading={loading}/>:
        view==="my-sessions"?<MySessions items={items} loading={loading} reload={reload}/>:
-       <ResourceView view={view} items={items} loading={loading} reload={reload}/>}
+       <ResourceView view={view} items={items} loading={loading} reload={reload} canMFARead={hasPermission(access,"mfa.read")} canMFAWrite={hasPermission(access,"mfa.write")}/>}
     </main>
   </div>;
 }
@@ -324,7 +324,7 @@ function AuditView(){
   </>;
 }
 
-function ResourceView({view,items,loading,reload}:{view:View;items:Item[];loading:boolean;reload:()=>void}){
+function ResourceView({view,items,loading,reload,canMFARead,canMFAWrite}:{view:View;items:Item[];loading:boolean;reload:()=>void;canMFARead:boolean;canMFAWrite:boolean}){
   const [query,setQuery]=useState("");
   const [page,setPage]=useState(1);
   const pageSize=25;
@@ -345,9 +345,9 @@ function ResourceView({view,items,loading,reload}:{view:View;items:Item[];loadin
       {loading?<p>Loading…</p>:filtered.length===0?<p>No records.</p>:<>
         <table><thead><tr>{columns(view).map(c=><th key={c}>{c}</th>)}{["users","groups","applications","sessions"].includes(view)&&<th>actions</th>}</tr></thead><tbody>{pageItems.map((x,i)=><tr key={String(x.id||i)}>
           {columns(view).map(c=><td key={c}>{render(x[c])}</td>)}
-          {view==="users"&&<td><UserActions user={x} reload={reload}/></td>}
-          {view==="groups"&&<td><GroupActions group={x} reload={reload}/></td>}
-          {view==="applications"&&<td><ApplicationActions app={x} reload={reload}/></td>}
+          {view==="users"&&<td><UserActions user={x} reload={reload} canMFARead={canMFARead} canMFAWrite={canMFAWrite}/></td>}
+          {view==="groups"&&<td><GroupActions group={x} reload={reload} canMFARead={canMFARead} canMFAWrite={canMFAWrite}/></td>}
+          {view==="applications"&&<td><ApplicationActions app={x} reload={reload} canMFARead={canMFARead} canMFAWrite={canMFAWrite}/></td>}
           {view==="sessions"&&<td><SessionActions session={x} reload={reload}/></td>}
         </tr>)}</tbody></table>
         <div className="pager"><button className="secondary" disabled={page<=1} onClick={()=>setPage(p=>p-1)}>Previous</button><span>Page {page} / {pageCount}</span><button className="secondary" disabled={page>=pageCount} onClick={()=>setPage(p=>p+1)}>Next</button></div>
@@ -356,30 +356,37 @@ function ResourceView({view,items,loading,reload}:{view:View;items:Item[];loadin
   </>;
 }
 
-function UserActions({user,reload}:{user:Item;reload:()=>void}){
+function UserActions({user,reload,canMFARead,canMFAWrite}:{user:Item;reload:()=>void;canMFARead:boolean;canMFAWrite:boolean}){
   const [busy,setBusy]=useState(false);
+  const [mfaInfo,setMFAInfo]=useState<any|null>(null);
   const id=String(user.id);
   const run=async(fn:()=>Promise<unknown>)=>{setBusy(true);try{await fn();reload()}catch(e){window.alert((e as Error).message)}finally{setBusy(false)}};
   const toggle=()=>run(()=>api(`/api/v1/users/${id}`,{method:"PATCH",body:JSON.stringify({email:user.email,display_name:user.display_name,active:!Boolean(user.active)})}));
   const reset=()=>{const password=window.prompt("Temporary password (minimum policy length):");if(!password)return;if(!window.confirm("Reset password and revoke all sessions for this user?"))return;void run(()=>api(`/api/v1/users/${id}/reset-password`,{method:"POST",body:JSON.stringify({password})}))};
-  return <div className="actions"><button disabled={busy} className="secondary" onClick={toggle}>{user.active?"Disable":"Enable"}</button><button disabled={busy} className="secondary" onClick={()=>void run(()=>api(`/api/v1/users/${id}/unlock`,{method:"POST"}))}>Unlock</button><button disabled={busy} className="secondary" onClick={reset}>Reset password</button><button disabled={busy} className="danger" onClick={()=>window.confirm("Revoke all sessions for this user?")&&void run(()=>api(`/api/v1/users/${id}/sessions/revoke-all`,{method:"POST"}))}>Revoke sessions</button></div>;
+  const loadMFA=async()=>{try{setMFAInfo(await api("/api/v1/users/"+id+"/mfa"))}catch(e){window.alert((e as Error).message)}};
+  const resetMFA=async()=>{if(!window.confirm("Reset all MFA factors and revoke active sessions for this user?"))return;await run(()=>api("/api/v1/users/"+id+"/mfa/reset",{method:"POST"}));setMFAInfo(null)};
+  return <div className="actionPanel"><div className="actions"><button disabled={busy} className="secondary" onClick={toggle}>{user.active?"Disable":"Enable"}</button><button disabled={busy} className="secondary" onClick={()=>void run(()=>api(`/api/v1/users/${id}/unlock`,{method:"POST"}))}>Unlock</button><button disabled={busy} className="secondary" onClick={reset}>Reset password</button><button disabled={busy} className="danger" onClick={()=>window.confirm("Revoke all sessions for this user?")&&void run(()=>api(`/api/v1/users/${id}/sessions/revoke-all`,{method:"POST"}))}>Revoke sessions</button>{canMFARead&&<button className="secondary" onClick={()=>void loadMFA()}>MFA status</button>}{canMFAWrite&&<button disabled={busy} className="danger" onClick={()=>void resetMFA()}>Reset MFA</button>}</div>
+    {mfaInfo&&<div className="details"><strong>MFA status</strong><span>Required: {mfaInfo.status?.required?"Yes":"No"}</span><span>TOTP: {mfaInfo.status?.totp_enabled?"Enabled":"Disabled"}</span><span>WebAuthn credentials: {String(mfaInfo.status?.webauthn_credentials??0)}</span><span>Recovery codes: {String(mfaInfo.status?.recovery_codes_remaining??0)}</span></div>}
+  </div>;
 }
 
-function GroupActions({group,reload}:{group:Item;reload:()=>void}){
-  const [busy,setBusy]=useState(false),[members,setMembers]=useState<Item[]|null>(null);
+function GroupActions({group,reload,canMFARead,canMFAWrite}:{group:Item;reload:()=>void;canMFARead:boolean;canMFAWrite:boolean}){
+  const [busy,setBusy]=useState(false),[members,setMembers]=useState<Item[]|null>(null),[mfaRequired,setMFARequired]=useState<boolean|null>(null);
   const id=String(group.id);
   const run=async(fn:()=>Promise<unknown>)=>{setBusy(true);try{await fn();reload()}catch(e){window.alert((e as Error).message)}finally{setBusy(false)}};
   const edit=()=>{const name=window.prompt("Group name:",String(group.name??""));if(!name)return;const description=window.prompt("Description:",String(group.description??""))??"";void run(()=>api(`/api/v1/groups/${id}`,{method:"PATCH",body:JSON.stringify({name,description})}))};
   const add=()=>{const userId=window.prompt("User ID to add:");if(userId)void run(()=>api(`/api/v1/groups/${id}/members`,{method:"POST",body:JSON.stringify({user_id:userId})}))};
   const loadMembers=async()=>{try{const data=await api(`/api/v1/groups/${id}/members`);setMembers(data.items||[])}catch(e){window.alert((e as Error).message)}};
   const remove=async(userId:string)=>{if(!window.confirm("Remove this user from the group?"))return;await run(()=>api(`/api/v1/groups/${id}/members/${userId}`,{method:"DELETE"}));await loadMembers()};
-  return <div className="actionPanel"><div className="actions"><button disabled={busy} className="secondary" onClick={edit}>Edit</button><button disabled={busy} className="secondary" onClick={add}>Add member</button><button className="secondary" onClick={()=>void loadMembers()}>Members</button><button disabled={busy} className="danger" onClick={()=>window.confirm("Delete this group?")&&void run(()=>api(`/api/v1/groups/${id}`,{method:"DELETE"}))}>Delete</button></div>
+  const loadMFAPolicy=async()=>{try{const data=await api("/api/v1/groups/"+id+"/mfa-policy");setMFARequired(Boolean(data.required))}catch(e){window.alert((e as Error).message)}};
+  const toggleMFA=async()=>{let current=mfaRequired;if(current===null){const data=await api("/api/v1/groups/"+id+"/mfa-policy");current=Boolean(data.required)}await run(()=>api("/api/v1/groups/"+id+"/mfa-policy",{method:"PUT",body:JSON.stringify({required:!current})}));setMFARequired(!current)};
+  return <div className="actionPanel"><div className="actions"><button disabled={busy} className="secondary" onClick={edit}>Edit</button><button disabled={busy} className="secondary" onClick={add}>Add member</button><button className="secondary" onClick={()=>void loadMembers()}>Members</button>{canMFARead&&<button className="secondary" onClick={()=>void loadMFAPolicy()}>MFA policy{mfaRequired===null?"":mfaRequired?" (required)":" (optional)"}</button>}{canMFAWrite&&<button disabled={busy} className="secondary" onClick={()=>void toggleMFA()}>Toggle MFA</button>}<button disabled={busy} className="danger" onClick={()=>window.confirm("Delete this group?")&&void run(()=>api(`/api/v1/groups/${id}`,{method:"DELETE"}))}>Delete</button></div>
     {members&&<div className="details"><strong>Members</strong>{members.length===0?<span>None</span>:members.map(m=><div className="detailRow" key={String(m.id)}><span>{String(m.username)} · {String(m.email)}</span><button className="danger compact" onClick={()=>void remove(String(m.id))}>Remove</button></div>)}</div>}
   </div>;
 }
 
-function ApplicationActions({app,reload}:{app:Item;reload:()=>void}){
-  const [busy,setBusy]=useState(false),[details,setDetails]=useState<Item|null>(null),[assignments,setAssignments]=useState<{users:Item[];groups:Item[]}|null>(null);
+function ApplicationActions({app,reload,canMFARead,canMFAWrite}:{app:Item;reload:()=>void;canMFARead:boolean;canMFAWrite:boolean}){
+  const [busy,setBusy]=useState(false),[details,setDetails]=useState<Item|null>(null),[assignments,setAssignments]=useState<{users:Item[];groups:Item[]}|null>(null),[mfaRequired,setMFARequired]=useState<boolean|null>(null);
   const id=String(app.id);
   const loadDetails=async()=>{try{setDetails(await api(`/api/v1/applications/${id}/integration`))}catch(e){window.alert((e as Error).message)}};
   const loadAssignments=async()=>{try{setAssignments(await api(`/api/v1/applications/${id}/assignments`))}catch(e){window.alert((e as Error).message)}};
@@ -399,7 +406,9 @@ function ApplicationActions({app,reload}:{app:Item;reload:()=>void}){
       redirect_uris:d.redirect_uris||[],post_logout_redirect_uris:d.post_logout_redirect_uris||[],allowed_scopes:d.scopes||[]
     })}));
   };
-  return <div className="actionPanel"><div className="actions"><button className="secondary" onClick={()=>void loadDetails()}>Integration</button><button className="secondary" onClick={()=>void edit(false)}>Edit</button><button className="secondary" onClick={()=>void edit(true)}>{app.enabled?"Disable":"Enable"}</button>{!app.public_client&&<button disabled={busy} className="secondary" onClick={()=>void rotate()}>Rotate secret</button>}<button className="secondary" onClick={assignUser}>Assign user</button><button className="secondary" onClick={assignGroup}>Assign group</button><button className="secondary" onClick={()=>void loadAssignments()}>Assignments</button></div>
+  const loadMFAPolicy=async()=>{try{const data=await api("/api/v1/applications/"+id+"/mfa-policy");setMFARequired(Boolean(data.required))}catch(e){window.alert((e as Error).message)}};
+  const toggleMFA=async()=>{let current=mfaRequired;if(current===null){const data=await api("/api/v1/applications/"+id+"/mfa-policy");current=Boolean(data.required)}await run(()=>api("/api/v1/applications/"+id+"/mfa-policy",{method:"PUT",body:JSON.stringify({required:!current})}));setMFARequired(!current)};
+  return <div className="actionPanel"><div className="actions"><button className="secondary" onClick={()=>void loadDetails()}>Integration</button><button className="secondary" onClick={()=>void edit(false)}>Edit</button><button className="secondary" onClick={()=>void edit(true)}>{app.enabled?"Disable":"Enable"}</button>{!app.public_client&&<button disabled={busy} className="secondary" onClick={()=>void rotate()}>Rotate secret</button>}<button className="secondary" onClick={assignUser}>Assign user</button><button className="secondary" onClick={assignGroup}>Assign group</button><button className="secondary" onClick={()=>void loadAssignments()}>Assignments</button>{canMFARead&&<button className="secondary" onClick={()=>void loadMFAPolicy()}>MFA policy{mfaRequired===null?"":mfaRequired?" (required)":" (optional)"}</button>}{canMFAWrite&&<button disabled={busy} className="secondary" onClick={()=>void toggleMFA()}>Toggle MFA</button>}</div>
     {details&&<div className="details"><strong>Integration details</strong><code>Issuer: {String(details.issuer)}</code><code>Client ID: {String(details.client_id)}</code><code>Authorize: {String(details.authorization_url)}</code><code>Token: {String(details.token_url)}</code><code>JWKS: {String(details.jwks_url)}</code><code>Redirects: {render(details.redirect_uris)}</code><code>Scopes: {render(details.scopes)}</code><span>Client secret is never retrievable after creation or rotation.</span></div>}
     {assignments&&<div className="details"><strong>Assignments</strong>{assignments.users.map(u=><div className="detailRow" key={String(u.id)}><span>User: {String(u.username)}</span><button className="danger compact" onClick={()=>void removeUser(String(u.id))}>Remove</button></div>)}{assignments.groups.map(g=><div className="detailRow" key={String(g.id)}><span>Group: {String(g.name)}</span><button className="danger compact" onClick={()=>void removeGroup(String(g.id))}>Remove</button></div>)}</div>}
   </div>;
