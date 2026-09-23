@@ -11,6 +11,7 @@ CREATE TABLE saml_service_providers (
   metadata_xml text NOT NULL,
   require_signed_authn_requests boolean NOT NULL DEFAULT false,
   name_id_source text NOT NULL DEFAULT 'email' CHECK(name_id_source IN ('email')),
+  initiate_login_uri text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
