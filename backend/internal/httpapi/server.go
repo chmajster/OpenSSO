@@ -488,7 +488,21 @@ func (s *Server) addGroupMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
-	rows, e := s.db.Query(r.Context(), "SELECT a.id,a.name,a.protocol,a.enabled,c.client_id,c.public_client,c.require_pkce,c.allowed_scopes,c.initiate_login_uri,a.created_at FROM applications a JOIN oauth_clients c ON c.application_id=a.id ORDER BY a.name LIMIT 500")
+	rows, e := s.db.Query(r.Context(), `
+		SELECT a.id,a.name,a.protocol,a.enabled,
+		       COALESCE(c.client_id,''),
+		       COALESCE(c.public_client,false),
+		       COALESCE(c.require_pkce,false),
+		       COALESCE(c.allowed_scopes,ARRAY[]::text[]),
+		       COALESCE(c.initiate_login_uri,sp.initiate_login_uri,''),
+		       COALESCE(sp.entity_id,''),
+		       a.created_at
+		FROM applications a
+		LEFT JOIN oauth_clients c ON c.application_id=a.id
+		LEFT JOIN saml_service_providers sp ON sp.application_id=a.id
+		ORDER BY a.name
+		LIMIT 500
+	`)
 	if e != nil {
 		problem(w, 500, "database error")
 		return
@@ -496,16 +510,31 @@ func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, n, p, cid string
-		var enabled, pub, pkce bool
+		var id, name, protocol, clientID, initiateLoginURI, entityID string
+		var enabled, publicClient, requirePKCE bool
 		var scopes []string
-		var initiateLoginURI *string
 		var created time.Time
-		if rows.Scan(&id, &n, &p, &enabled, &cid, &pub, &pkce, &scopes, &initiateLoginURI, &created) != nil {
+		if rows.Scan(
+			&id, &name, &protocol, &enabled,
+			&clientID, &publicClient, &requirePKCE, &scopes,
+			&initiateLoginURI, &entityID, &created,
+		) != nil {
 			problem(w, 500, "database error")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": n, "protocol": p, "enabled": enabled, "client_id": cid, "public_client": pub, "require_pkce": pkce, "allowed_scopes": scopes, "initiate_login_uri": initiateLoginURI, "created_at": created})
+		items = append(items, map[string]any{
+			"id": id,
+			"name": name,
+			"protocol": protocol,
+			"enabled": enabled,
+			"client_id": clientID,
+			"entity_id": entityID,
+			"public_client": publicClient,
+			"require_pkce": requirePKCE,
+			"allowed_scopes": scopes,
+			"initiate_login_uri": initiateLoginURI,
+			"created_at": created,
+		})
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
 }
