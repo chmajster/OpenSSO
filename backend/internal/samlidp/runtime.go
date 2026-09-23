@@ -11,6 +11,7 @@ import (
 	"github.com/chmajster/OpenSSO/backend/internal/config"
 	"github.com/zitadel/saml/pkg/provider"
 	"github.com/zitadel/saml/pkg/provider/signature"
+	"github.com/zitadel/saml/pkg/provider/serviceprovider"
 	samlxml "github.com/zitadel/saml/pkg/provider/xml"
 	"github.com/zitadel/saml/pkg/provider/xml/md"
 )
@@ -210,4 +211,12 @@ func ValidateServiceProviderMetadata(metadataXML string) (entityID string, err e
 		return "", errors.New("SAML SP metadata must contain an HTTP-POST AssertionConsumerService")
 	}
 	return entityID, nil
+}
+
+func serviceProviderForValidation(metadataXML string) (*serviceprovider.ServiceProvider, error) {
+	return serviceprovider.NewServiceProvider(
+		"metadata-validation",
+		&serviceprovider.Config{Metadata: []byte(metadataXML)},
+		func(string) string { return "" },
+	)
 }
