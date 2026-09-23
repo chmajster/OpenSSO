@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chmajster/OpenSSO/backend/internal/security"
+	"github.com/zitadel/saml/pkg/provider"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zitadel/saml/pkg/provider/key"
@@ -128,6 +129,15 @@ func (s *Storage) CreateAuthRequest(
 	}
 	if acsURL == "" || binding == "" {
 		return nil, errors.New("SAML ACS URL and binding are required")
+	}
+	if binding != provider.PostBinding {
+		return nil, errors.New("OpenSSO supports HTTP-POST SAML responses only")
+	}
+	if request.ProtocolBinding != "" && request.ProtocolBinding != provider.PostBinding {
+		return nil, errors.New("AuthnRequest requested unsupported response binding")
+	}
+	if request.AssertionConsumerServiceURL != "" && request.AssertionConsumerServiceURL != acsURL {
+		return nil, errors.New("AuthnRequest ACS URL does not exactly match registered metadata")
 	}
 	requestKey, err := security.RandomToken(32)
 	if err != nil {
