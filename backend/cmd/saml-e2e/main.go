@@ -523,6 +523,9 @@ func validateResponse(
 	if confirmation.Recipient != acsURL || confirmation.InResponseTo != requestID {
 		return errors.New("SAML SubjectConfirmationData mismatch")
 	}
+	if assertion.Conditions == nil {
+		return errors.New("SAML Conditions missing")
+	}
 	if len(assertion.Conditions.AudienceRestriction) == 0 ||
 		len(assertion.Conditions.AudienceRestriction[0].Audience) == 0 ||
 		assertion.Conditions.AudienceRestriction[0].Audience[0] != spEntityID {
