@@ -56,7 +56,7 @@ type webAuthnUser struct {
 	credentials []webauthn.Credential
 }
 
-func (u *webAuthnUser) WebAuthnID() []byte                          { return u.id }
+func (u *webAuthnUser) WebAuthnID() []byte                         { return u.id }
 func (u *webAuthnUser) WebAuthnName() string                       { return u.name }
 func (u *webAuthnUser) WebAuthnDisplayName() string                { return u.displayName }
 func (u *webAuthnUser) WebAuthnCredentials() []webauthn.Credential { return u.credentials }
@@ -85,7 +85,7 @@ func newWebAuthnProvider(db *pgxpool.Pool, rdb *redis.Client, box *secretBox, pu
 			UserVerification: protocol.VerificationPreferred,
 		},
 		Timeouts: webauthn.TimeoutsConfig{
-			Login: webauthn.TimeoutConfig{Enforce: true, Timeout: 2 * time.Minute, TimeoutUVD: 2 * time.Minute},
+			Login:        webauthn.TimeoutConfig{Enforce: true, Timeout: 2 * time.Minute, TimeoutUVD: 2 * time.Minute},
 			Registration: webauthn.TimeoutConfig{Enforce: true, Timeout: 3 * time.Minute, TimeoutUVD: 3 * time.Minute},
 		},
 	})

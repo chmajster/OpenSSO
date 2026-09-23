@@ -328,11 +328,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: "opensso_session", Value: token, Path: "/", HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
 	http.SetCookie(w, &http.Cookie{Name: "opensso_csrf", Value: csrf, Path: "/", HttpOnly: false, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
 	writeJSON(w, 200, map[string]any{
-		"user_id": uid,
-		"username": username,
-		"session_id": sessionID,
-		"expires_at": expires,
-		"mfa_required": mfaStatus.Required,
+		"user_id":                 uid,
+		"username":                username,
+		"session_id":              sessionID,
+		"expires_at":              expires,
+		"mfa_required":            mfaStatus.Required,
 		"mfa_enrollment_required": mfaStatus.Required && !mfaStatus.HasPrimaryFactor,
 	})
 }
@@ -356,12 +356,12 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"session_id": p.SessionID,
-		"user_id": p.UserID,
-		"username": p.Username,
-		"must_change_password": p.MustChangePassword,
-		"mfa_verified": p.MFAVerified,
-		"mfa_required": status.Required,
+		"session_id":              p.SessionID,
+		"user_id":                 p.UserID,
+		"username":                p.Username,
+		"must_change_password":    p.MustChangePassword,
+		"mfa_verified":            p.MFAVerified,
+		"mfa_required":            status.Required,
 		"mfa_enrollment_required": status.Required && !status.HasPrimaryFactor,
 	})
 }

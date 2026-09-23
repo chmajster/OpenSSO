@@ -18,31 +18,31 @@ import (
 )
 
 var (
-	ErrNotEnrolled = errors.New("MFA factor is not enrolled")
-	ErrAlreadyEnrolled = errors.New("MFA factor is already enrolled")
-	ErrInvalidCode = errors.New("invalid MFA code")
+	ErrNotEnrolled        = errors.New("MFA factor is not enrolled")
+	ErrAlreadyEnrolled    = errors.New("MFA factor is already enrolled")
+	ErrInvalidCode        = errors.New("invalid MFA code")
 	ErrLastRequiredFactor = errors.New("cannot remove the final MFA factor while policy requires MFA")
 )
 
 type Service struct {
-	db *pgxpool.Pool
+	db    *pgxpool.Pool
 	redis *redis.Client
-	box *secretBox
-	wa webAuthnProvider
+	box   *secretBox
+	wa    webAuthnProvider
 }
 
 type Status struct {
-	Required bool `json:"required"`
-	TOTPEnabled bool `json:"totp_enabled"`
-	WebAuthnCredentials int `json:"webauthn_credentials"`
-	Passkeys int `json:"passkeys"`
-	RecoveryCodesRemaining int `json:"recovery_codes_remaining"`
-	HasPrimaryFactor bool `json:"has_primary_factor"`
+	Required               bool `json:"required"`
+	TOTPEnabled            bool `json:"totp_enabled"`
+	WebAuthnCredentials    int  `json:"webauthn_credentials"`
+	Passkeys               int  `json:"passkeys"`
+	RecoveryCodesRemaining int  `json:"recovery_codes_remaining"`
+	HasPrimaryFactor       bool `json:"has_primary_factor"`
 }
 
 type TOTPEnrollment struct {
-	Secret string `json:"secret"`
-	OTPAuthURL string `json:"otpauth_url"`
+	Secret        string   `json:"secret"`
+	OTPAuthURL    string   `json:"otpauth_url"`
 	RecoveryCodes []string `json:"recovery_codes,omitempty"`
 }
 
@@ -125,12 +125,12 @@ func (s *Service) BeginTOTP(ctx context.Context, userID, accountName string) (TO
 	}
 
 	key, err := totp.Generate(totp.GenerateOpts{
-		Issuer: "OpenSSO",
+		Issuer:      "OpenSSO",
 		AccountName: accountName,
-		Period: 30,
-		SecretSize: 20,
-		Digits: otp.DigitsSix,
-		Algorithm: otp.AlgorithmSHA1,
+		Period:      30,
+		SecretSize:  20,
+		Digits:      otp.DigitsSix,
+		Algorithm:   otp.AlgorithmSHA1,
 	})
 	if err != nil {
 		return TOTPEnrollment{}, err
