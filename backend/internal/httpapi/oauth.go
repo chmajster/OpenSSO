@@ -124,9 +124,22 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/?return_to="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
 		return
 	}
+	mfaRequired, err := s.mfa.Required(r.Context(), p.UserID, &client.ApplicationID)
+	if err != nil {
+		problem(w, 500, "MFA policy lookup failed")
+		return
+	}
+	if mfaRequired && !p.MFAVerified {
+		if r.URL.Query().Get("prompt") == "none" {
+			redirectOAuthError(w, r, redirectURI, state, "interaction_required", "MFA verification required")
+			return
+		}
+		http.Redirect(w, r, "/?mfa=required&return_to="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
+		return
+	}
 
 	var granted []string
-	err := s.db.QueryRow(r.Context(), `SELECT granted_scopes FROM oauth_consents WHERE user_id=$1 AND application_id=$2`, p.UserID, client.ApplicationID).Scan(&granted)
+	err = s.db.QueryRow(r.Context(), `SELECT granted_scopes FROM oauth_consents WHERE user_id=$1 AND application_id=$2`, p.UserID, client.ApplicationID).Scan(&granted)
 	if err == nil && containsAll(granted, scopes) {
 		code, err := s.storeAuthorizationCode(r.Context(), client.ApplicationID, p.UserID, redirectURI, scope, nonce, challenge)
 		if err != nil {
@@ -866,14 +879,14 @@ func (s *Server) sessionPrincipal(r *http.Request) (principal, bool) {
 	}
 	var p principal
 	err = s.db.QueryRow(r.Context(), `
-		SELECT u.id,u.username,u.must_change_password
+		SELECT s.id,u.id,u.username,u.must_change_password,(s.mfa_verified_at IS NOT NULL)
 		FROM sessions s JOIN users u ON u.id=s.user_id
 		WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active=true
-	`, security.SHA256String(cookie.Value)).Scan(&p.UserID, &p.Username, &p.MustChangePassword)
+	`, security.SHA256String(cookie.Value)).Scan(&p.SessionID, &p.UserID, &p.Username, &p.MustChangePassword, &p.MFAVerified)
 	if err != nil {
 		return principal{}, false
 	}
-	_, _ = s.db.Exec(r.Context(), `UPDATE sessions SET last_seen_at=now() WHERE token_hash=$1`, security.SHA256String(cookie.Value))
+	_, _ = s.db.Exec(r.Context(), `UPDATE sessions SET last_seen_at=now() WHERE id=$1`, p.SessionID)
 	return p, true
 }
 

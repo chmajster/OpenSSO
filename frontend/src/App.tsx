@@ -1,8 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { api } from "./http";
+import { MFAChallenge, MFASettings } from "./mfa";
 
 type Item = Record<string, unknown>;
 type View =
-  | "my-apps" | "my-sessions" | "profile"
+  | "my-apps" | "my-sessions" | "profile" | "mfa"
   | "dashboard" | "users" | "groups" | "roles" | "applications"
   | "sessions" | "security" | "audit";
 
@@ -13,15 +15,12 @@ type Me = {
   user_id?: string;
   username?: string;
   must_change_password?: boolean;
+  mfa_verified?: boolean;
+  mfa_required?: boolean;
+  mfa_enrollment_required?: boolean;
 };
 
 type Access = { roles:string[]; permissions:string[] };
-
-function cookie(name:string){
-  const prefix=name+"=";
-  const value=document.cookie.split("; ").find(x=>x.startsWith(prefix));
-  return value?decodeURIComponent(value.slice(prefix.length)):"";
-}
 
 async function continueAuthorization(){
   const params=new URLSearchParams(window.location.search);
@@ -37,20 +36,6 @@ async function continueAuthorization(){
     return true;
   }
   return false;
-}
-
-async function api(path:string, init:RequestInit={}) {
-  const method=(init.method||"GET").toUpperCase();
-  const headers:Record<string,string>={"Content-Type":"application/json",...(init.headers as Record<string,string>||{})};
-  if(!["GET","HEAD","OPTIONS"].includes(method)){
-    const csrf=cookie("opensso_csrf");
-    if(csrf)headers["X-CSRF-Token"]=csrf;
-  }
-  const r=await fetch(path,{credentials:"include",...init,headers});
-  if(r.status===204)return null;
-  const body=await r.json().catch(()=>({detail:"Invalid server response"}));
-  if(!r.ok)throw new Error(body.detail||body.error||`HTTP ${r.status}`);
-  return body;
 }
 
 const adminResourceEndpoints: Partial<Record<View,string>> = {
@@ -87,9 +72,14 @@ export default function App(){
     setInitialized(Boolean(status.initialized));
     if(!status.initialized)return;
     try{
-      const current=await api("/api/v1/me");
-      const currentAccess:Access=await api("/api/v1/me/access");
+      const current:Me=await api("/api/v1/me");
       setMe(current);
+      const forceMFA=new URLSearchParams(window.location.search).get("mfa")==="required";
+      if(current.must_change_password || ((current.mfa_required || forceMFA) && !current.mfa_verified)){
+        setAccess(null);
+        return;
+      }
+      const currentAccess:Access=await api("/api/v1/me/access");
       setAccess(currentAccess);
       setView(v=>v==="my-apps"?defaultView(currentAccess):v);
     }catch{
@@ -133,6 +123,8 @@ export default function App(){
   if(!initialized)return <Bootstrap onDone={refreshSession}/>;
   if(!me)return <Login onDone={refreshSession}/>;
   if(Boolean(me.MustChangePassword ?? me.must_change_password))return <ChangePassword onDone={refreshSession}/>;
+  const forceMFA=new URLSearchParams(window.location.search).get("mfa")==="required";
+  if((Boolean(me.mfa_required)||forceMFA) && !Boolean(me.mfa_verified))return <MFAChallenge onDone={async()=>{await refreshSession();continueAuthorization()}}/>;
 
   const logout=async()=>{await api("/api/v1/auth/logout",{method:"POST"});setMe(null);setAccess(null)};
   const reload=()=>setReloadKey(x=>x+1);
@@ -155,16 +147,17 @@ export default function App(){
       {view==="dashboard"?<Dashboard data={dashboard} loading={loading}/>:
        view==="security"?<SecurityPolicy data={policy} loading={loading} onSaved={reload}/>:
        view==="profile"?<ProfileView data={profile} loading={loading} onSaved={reload}/>:
+       view==="mfa"?<MFASettings/>:
        view==="audit"?<AuditView/>:
        view==="my-apps"?<MyApplications items={items} loading={loading}/>:
        view==="my-sessions"?<MySessions items={items} loading={loading} reload={reload}/>:
-       <ResourceView view={view} items={items} loading={loading} reload={reload} access={access}/>}
+       <ResourceView view={view} items={items} loading={loading} reload={reload} access={access} canMFARead={hasPermission(access,"mfa.read")} canMFAWrite={hasPermission(access,"mfa.write")}/>}
     </main>
   </div>;
 }
 
 function navigation(access:Access|null):View[]{
-  const result:View[]=["my-apps","my-sessions","profile"];
+  const result:View[]=["my-apps","mfa","my-sessions","profile"];
   if(hasPermission(access,"users.read"))result.push("dashboard","users");
   if(hasPermission(access,"groups.read"))result.push("groups");
   if(hasPermission(access,"users.read"))result.push("roles");
@@ -238,7 +231,8 @@ function SecurityPolicy({data,loading,onSaved}:{data:Item;loading:boolean;onSave
         password_require_digit:f.get("password_require_digit")==="on",
         password_require_symbol:f.get("password_require_symbol")==="on",
         lockout_threshold:Number(f.get("lockout_threshold")),
-        lockout_minutes:Number(f.get("lockout_minutes")),session_ttl_minutes:Number(f.get("session_ttl_minutes"))
+        lockout_minutes:Number(f.get("lockout_minutes")),session_ttl_minutes:Number(f.get("session_ttl_minutes")),
+        mfa_required:f.get("mfa_required")==="on"
       })});
       onSaved();
     }catch(x){setError((x as Error).message)}finally{setBusy(false)}
@@ -252,6 +246,7 @@ function SecurityPolicy({data,loading,onSaved}:{data:Item;loading:boolean;onSave
     <NumberField name="lockout_threshold" label="Failed attempts before lockout" value={Number(data.lockout_threshold??10)} min={3} max={100}/>
     <NumberField name="lockout_minutes" label="Lockout minutes" value={Number(data.lockout_minutes??15)} min={1} max={1440}/>
     <NumberField name="session_ttl_minutes" label="Session TTL minutes" value={Number(data.session_ttl_minutes??720)} min={5} max={10080}/>
+    <CheckField name="mfa_required" label="Require MFA globally" checked={Boolean(data.mfa_required)}/>
     <button disabled={busy}>{busy?"Saving…":"Save policy"}</button>
   </form></section>
 }
@@ -343,7 +338,7 @@ function AuditView(){
   </>;
 }
 
-function ResourceView({view,items,loading,reload,access}:{view:View;items:Item[];loading:boolean;reload:()=>void;access:Access|null}){
+function ResourceView({view,items,loading,reload,access,canMFARead,canMFAWrite}:{view:View;items:Item[];loading:boolean;reload:()=>void;access:Access|null;canMFARead:boolean;canMFAWrite:boolean}){
   const [query,setQuery]=useState("");
   const [page,setPage]=useState(1);
   const pageSize=25;
@@ -369,9 +364,9 @@ function ResourceView({view,items,loading,reload,access}:{view:View;items:Item[]
       {loading?<p>Loading…</p>:filtered.length===0?<p>No records.</p>:<>
         <table><thead><tr>{columns(view).map(c=><th key={c}>{c}</th>)}{["users","groups","applications","sessions"].includes(view)&&<th>actions</th>}</tr></thead><tbody>{pageItems.map((x,i)=><tr key={String(x.id||i)}>
           {columns(view).map(c=><td key={c}>{render(x[c])}</td>)}
-          {view==="users"&&<td><UserActions user={x} reload={reload}/></td>}
-          {view==="groups"&&<td><GroupActions group={x} reload={reload}/></td>}
-          {view==="applications"&&<td><ApplicationActions app={x} reload={reload}/></td>}
+          {view==="users"&&<td><UserActions user={x} reload={reload} canMFARead={canMFARead} canMFAWrite={canMFAWrite}/></td>}
+          {view==="groups"&&<td><GroupActions group={x} reload={reload} canMFARead={canMFARead} canMFAWrite={canMFAWrite}/></td>}
+          {view==="applications"&&<td><ApplicationActions app={x} reload={reload} canMFARead={canMFARead} canMFAWrite={canMFAWrite}/></td>}
           {view==="sessions"&&<td><SessionActions session={x} reload={reload}/></td>}
         </tr>)}</tbody></table>
         <div className="pager"><button className="secondary" disabled={page<=1} onClick={()=>setPage(p=>p-1)}>Previous</button><span>Page {page} / {pageCount}</span><button className="secondary" disabled={page>=pageCount} onClick={()=>setPage(p=>p+1)}>Next</button></div>
@@ -380,30 +375,37 @@ function ResourceView({view,items,loading,reload,access}:{view:View;items:Item[]
   </>;
 }
 
-function UserActions({user,reload}:{user:Item;reload:()=>void}){
+function UserActions({user,reload,canMFARead,canMFAWrite}:{user:Item;reload:()=>void;canMFARead:boolean;canMFAWrite:boolean}){
   const [busy,setBusy]=useState(false);
+  const [mfaInfo,setMFAInfo]=useState<any|null>(null);
   const id=String(user.id);
   const run=async(fn:()=>Promise<unknown>)=>{setBusy(true);try{await fn();reload()}catch(e){window.alert((e as Error).message)}finally{setBusy(false)}};
   const toggle=()=>run(()=>api(`/api/v1/users/${id}`,{method:"PATCH",body:JSON.stringify({email:user.email,display_name:user.display_name,active:!Boolean(user.active)})}));
   const reset=()=>{const password=window.prompt("Temporary password (minimum policy length):");if(!password)return;if(!window.confirm("Reset password and revoke all sessions for this user?"))return;void run(()=>api(`/api/v1/users/${id}/reset-password`,{method:"POST",body:JSON.stringify({password})}))};
-  return <div className="actions"><button disabled={busy} className="secondary" onClick={toggle}>{user.active?"Disable":"Enable"}</button><button disabled={busy} className="secondary" onClick={()=>void run(()=>api(`/api/v1/users/${id}/unlock`,{method:"POST"}))}>Unlock</button><button disabled={busy} className="secondary" onClick={reset}>Reset password</button><button disabled={busy} className="danger" onClick={()=>window.confirm("Revoke all sessions for this user?")&&void run(()=>api(`/api/v1/users/${id}/sessions/revoke-all`,{method:"POST"}))}>Revoke sessions</button></div>;
+  const loadMFA=async()=>{try{setMFAInfo(await api("/api/v1/users/"+id+"/mfa"))}catch(e){window.alert((e as Error).message)}};
+  const resetMFA=async()=>{if(!window.confirm("Reset all MFA factors and revoke active sessions for this user?"))return;await run(()=>api("/api/v1/users/"+id+"/mfa/reset",{method:"POST"}));setMFAInfo(null)};
+  return <div className="actionPanel"><div className="actions"><button disabled={busy} className="secondary" onClick={toggle}>{user.active?"Disable":"Enable"}</button><button disabled={busy} className="secondary" onClick={()=>void run(()=>api(`/api/v1/users/${id}/unlock`,{method:"POST"}))}>Unlock</button><button disabled={busy} className="secondary" onClick={reset}>Reset password</button><button disabled={busy} className="danger" onClick={()=>window.confirm("Revoke all sessions for this user?")&&void run(()=>api(`/api/v1/users/${id}/sessions/revoke-all`,{method:"POST"}))}>Revoke sessions</button>{canMFARead&&<button className="secondary" onClick={()=>void loadMFA()}>MFA status</button>}{canMFAWrite&&<button disabled={busy} className="danger" onClick={()=>void resetMFA()}>Reset MFA</button>}</div>
+    {mfaInfo&&<div className="details"><strong>MFA status</strong><span>Required: {mfaInfo.status?.required?"Yes":"No"}</span><span>TOTP: {mfaInfo.status?.totp_enabled?"Enabled":"Disabled"}</span><span>WebAuthn credentials: {String(mfaInfo.status?.webauthn_credentials??0)}</span><span>Recovery codes: {String(mfaInfo.status?.recovery_codes_remaining??0)}</span></div>}
+  </div>;
 }
 
-function GroupActions({group,reload}:{group:Item;reload:()=>void}){
-  const [busy,setBusy]=useState(false),[members,setMembers]=useState<Item[]|null>(null);
+function GroupActions({group,reload,canMFARead,canMFAWrite}:{group:Item;reload:()=>void;canMFARead:boolean;canMFAWrite:boolean}){
+  const [busy,setBusy]=useState(false),[members,setMembers]=useState<Item[]|null>(null),[mfaRequired,setMFARequired]=useState<boolean|null>(null);
   const id=String(group.id);
   const run=async(fn:()=>Promise<unknown>)=>{setBusy(true);try{await fn();reload()}catch(e){window.alert((e as Error).message)}finally{setBusy(false)}};
   const edit=()=>{const name=window.prompt("Group name:",String(group.name??""));if(!name)return;const description=window.prompt("Description:",String(group.description??""))??"";void run(()=>api(`/api/v1/groups/${id}`,{method:"PATCH",body:JSON.stringify({name,description})}))};
   const add=()=>{const userId=window.prompt("User ID to add:");if(userId)void run(()=>api(`/api/v1/groups/${id}/members`,{method:"POST",body:JSON.stringify({user_id:userId})}))};
   const loadMembers=async()=>{try{const data=await api(`/api/v1/groups/${id}/members`);setMembers(data.items||[])}catch(e){window.alert((e as Error).message)}};
   const remove=async(userId:string)=>{if(!window.confirm("Remove this user from the group?"))return;await run(()=>api(`/api/v1/groups/${id}/members/${userId}`,{method:"DELETE"}));await loadMembers()};
-  return <div className="actionPanel"><div className="actions"><button disabled={busy} className="secondary" onClick={edit}>Edit</button><button disabled={busy} className="secondary" onClick={add}>Add member</button><button className="secondary" onClick={()=>void loadMembers()}>Members</button><button disabled={busy} className="danger" onClick={()=>window.confirm("Delete this group?")&&void run(()=>api(`/api/v1/groups/${id}`,{method:"DELETE"}))}>Delete</button></div>
+  const loadMFAPolicy=async()=>{try{const data=await api("/api/v1/groups/"+id+"/mfa-policy");setMFARequired(Boolean(data.required))}catch(e){window.alert((e as Error).message)}};
+  const toggleMFA=async()=>{let current=mfaRequired;if(current===null){const data=await api("/api/v1/groups/"+id+"/mfa-policy");current=Boolean(data.required)}await run(()=>api("/api/v1/groups/"+id+"/mfa-policy",{method:"PUT",body:JSON.stringify({required:!current})}));setMFARequired(!current)};
+  return <div className="actionPanel"><div className="actions"><button disabled={busy} className="secondary" onClick={edit}>Edit</button><button disabled={busy} className="secondary" onClick={add}>Add member</button><button className="secondary" onClick={()=>void loadMembers()}>Members</button>{canMFARead&&<button className="secondary" onClick={()=>void loadMFAPolicy()}>MFA policy{mfaRequired===null?"":mfaRequired?" (required)":" (optional)"}</button>}{canMFAWrite&&<button disabled={busy} className="secondary" onClick={()=>void toggleMFA()}>Toggle MFA</button>}<button disabled={busy} className="danger" onClick={()=>window.confirm("Delete this group?")&&void run(()=>api(`/api/v1/groups/${id}`,{method:"DELETE"}))}>Delete</button></div>
     {members&&<div className="details"><strong>Members</strong>{members.length===0?<span>None</span>:members.map(m=><div className="detailRow" key={String(m.id)}><span>{String(m.username)} · {String(m.email)}</span><button className="danger compact" onClick={()=>void remove(String(m.id))}>Remove</button></div>)}</div>}
   </div>;
 }
 
-function ApplicationActions({app,reload}:{app:Item;reload:()=>void}){
-  const [busy,setBusy]=useState(false),[details,setDetails]=useState<Item|null>(null),[assignments,setAssignments]=useState<{users:Item[];groups:Item[]}|null>(null);
+function ApplicationActions({app,reload,canMFARead,canMFAWrite}:{app:Item;reload:()=>void;canMFARead:boolean;canMFAWrite:boolean}){
+  const [busy,setBusy]=useState(false),[details,setDetails]=useState<Item|null>(null),[assignments,setAssignments]=useState<{users:Item[];groups:Item[]}|null>(null),[mfaRequired,setMFARequired]=useState<boolean|null>(null);
   const id=String(app.id);
   const protocol=String(app.protocol||"oidc");
   const integrationURL=protocol==="saml"?`/api/v1/saml/applications/${id}/integration`:`/api/v1/applications/${id}/integration`;
@@ -441,6 +443,8 @@ function ApplicationActions({app,reload}:{app:Item;reload:()=>void}){
     })}));
   };
 
+  const loadMFAPolicy=async()=>{try{const data=await api("/api/v1/applications/"+id+"/mfa-policy");setMFARequired(Boolean(data.required))}catch(e){window.alert((e as Error).message)}};
+  const toggleMFA=async()=>{let current=mfaRequired;if(current===null){const data=await api("/api/v1/applications/"+id+"/mfa-policy");current=Boolean(data.required)}await run(()=>api("/api/v1/applications/"+id+"/mfa-policy",{method:"PUT",body:JSON.stringify({required:!current})}));setMFARequired(!current)};
   const edit=(toggleOnly=false)=>protocol==="saml"?editSAML(toggleOnly):editOIDC(toggleOnly);
 
   return <div className="actionPanel"><div className="actions">
@@ -451,6 +455,8 @@ function ApplicationActions({app,reload}:{app:Item;reload:()=>void}){
     <button className="secondary" onClick={assignUser}>Assign user</button>
     <button className="secondary" onClick={assignGroup}>Assign group</button>
     <button className="secondary" onClick={()=>void loadAssignments()}>Assignments</button>
+    {canMFARead&&<button className="secondary" onClick={()=>void loadMFAPolicy()}>MFA policy{mfaRequired===null?"":mfaRequired?" (required)":" (optional)"}</button>}
+    {canMFAWrite&&<button disabled={busy} className="secondary" onClick={()=>void toggleMFA()}>Toggle MFA</button>}
   </div>
     {details&&protocol==="oidc"&&<div className="details"><strong>OIDC integration</strong><code>Issuer: {String(details.issuer)}</code><code>Client ID: {String(details.client_id)}</code><code>Authorize: {String(details.authorization_url)}</code><code>Token: {String(details.token_url)}</code><code>JWKS: {String(details.jwks_url)}</code><code>Redirects: {render(details.redirect_uris)}</code><code>Scopes: {render(details.scopes)}</code><span>Client secret is never retrievable after creation or rotation.</span></div>}
     {details&&protocol==="saml"&&<div className="details"><strong>SAML integration</strong><code>IdP Entity ID: {String(details.idp_entity_id)}</code><code>IdP metadata: {String(details.idp_metadata_url)}</code><code>SSO URL: {String(details.sso_url)}</code><code>SP Entity ID: {String(details.sp_entity_id)}</code><code>NameID: {String(details.name_id_format)}</code><code>Request binding: {String(details.request_binding)}</code><code>Response binding: {String(details.response_binding)}</code><span>AuthnRequest signature required: {String(details.require_signed_authn_request)}</span></div>}
@@ -536,8 +542,8 @@ function CheckField({name,label,checked}:{name:string;label:string;checked:boole
 function ErrorBox({text}:{text:string}){return <div className="error" role="alert">{text}</div>}
 function Centered({children}:{children:React.ReactNode}){return <div className="centered">{children}</div>}
 function render(v:unknown){if(Array.isArray(v))return v.join(", ");if(typeof v==="boolean")return v?"Yes":"No";if(v==null||v==="")return "—";return String(v)}
-function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile"})[v]}
-function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials"})[v]}
+function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile",mfa:"MFA"})[v]}
+function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials",mfa:"Authenticator, passkeys, security keys and recovery codes"})[v]}
 function columns(v:View){return ({
   users:["id","username","email","display_name","active","must_change_password","locked_until","created_at"],
   groups:["id","name","description","created_at"],
@@ -545,5 +551,5 @@ function columns(v:View){return ({
   applications:["id","name","protocol","client_id","entity_id","enabled","initiate_login_uri","created_at"],
   sessions:["id","username","ip","user_agent","last_seen_at","expires_at"],
   audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"],
-  dashboard:[],security:[],profile:[],"my-apps":[],"my-sessions":[]
+  dashboard:[],security:[],profile:[],mfa:[],"my-apps":[],"my-sessions":[]
 })[v]||[]}

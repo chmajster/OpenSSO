@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/chmajster/OpenSSO/backend/internal/config"
+	"github.com/chmajster/OpenSSO/backend/internal/mfa"
 	"github.com/chmajster/OpenSSO/backend/internal/oidc"
 	"github.com/chmajster/OpenSSO/backend/internal/samlidp"
 	"github.com/chmajster/OpenSSO/backend/internal/security"
@@ -27,19 +28,23 @@ type Server struct {
 	redis *redis.Client
 	log   *slog.Logger
 	keys  *oidc.KeyManager
+	mfa   *mfa.Service
 	saml  *samlidp.Runtime
 }
 type principal struct {
-	UserID, Username   string
+	SessionID          string
+	UserID             string
+	Username           string
 	MustChangePassword bool
+	MFAVerified        bool
 }
 type contextKey string
 
 const principalKey contextKey = "principal"
 const requestIDKey contextKey = "request_id"
 
-func New(cfg config.Config, db *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, keys *oidc.KeyManager, saml *samlidp.Runtime) *Server {
-	return &Server{cfg: cfg, db: db, redis: rdb, log: log, keys: keys, saml: saml}
+func New(cfg config.Config, db *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, keys *oidc.KeyManager, mfaService *mfa.Service, saml *samlidp.Runtime) *Server {
+	return &Server{cfg: cfg, db: db, redis: rdb, log: log, keys: keys, mfa: mfaService, saml: saml}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -63,12 +68,23 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/setup/status", s.setupStatus)
 	m.HandleFunc("POST /api/v1/setup/bootstrap", s.bootstrap)
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
-	m.HandleFunc("POST /api/v1/auth/logout", s.withPrincipal(s.logout))
-	m.HandleFunc("GET /api/v1/me", s.withPrincipal(s.me))
+	m.HandleFunc("POST /api/v1/auth/logout", s.withPrincipalRaw(s.logout))
+	m.HandleFunc("POST /api/v1/auth/mfa/verify", s.withPrincipalRaw(s.verifyMFAFactor))
+	m.HandleFunc("POST /api/v1/auth/mfa/webauthn/begin", s.withPrincipalRaw(s.beginWebAuthnAuthentication))
+	m.HandleFunc("POST /api/v1/auth/mfa/webauthn/finish", s.withPrincipalRaw(s.finishWebAuthnAuthentication))
+	m.HandleFunc("GET /api/v1/me", s.withPrincipalRaw(s.me))
+	m.HandleFunc("GET /api/v1/me/mfa/status", s.withPrincipalRaw(s.myMFAStatus))
+	m.HandleFunc("POST /api/v1/me/mfa/totp/begin", s.withPrincipalRaw(s.beginTOTPEnrollment))
+	m.HandleFunc("POST /api/v1/me/mfa/totp/confirm", s.withPrincipalRaw(s.confirmTOTPEnrollment))
+	m.HandleFunc("DELETE /api/v1/me/mfa/totp", s.withPrincipalRaw(s.disableTOTP))
+	m.HandleFunc("POST /api/v1/me/mfa/recovery/regenerate", s.withPrincipalRaw(s.regenerateRecoveryCodes))
+	m.HandleFunc("POST /api/v1/me/mfa/webauthn/register/begin", s.withPrincipalRaw(s.beginWebAuthnRegistration))
+	m.HandleFunc("POST /api/v1/me/mfa/webauthn/register/finish", s.withPrincipalRaw(s.finishWebAuthnRegistration))
+	m.HandleFunc("DELETE /api/v1/me/mfa/webauthn/{id}", s.withPrincipalRaw(s.deleteWebAuthnCredential))
 	m.HandleFunc("GET /api/v1/me/access", s.withPrincipal(s.myAccess))
 	m.HandleFunc("GET /api/v1/me/profile", s.withPrincipal(s.myProfile))
 	m.HandleFunc("PATCH /api/v1/me/profile", s.withPrincipal(s.updateMyProfile))
-	m.HandleFunc("POST /api/v1/me/password", s.withPrincipal(s.changeOwnPassword))
+	m.HandleFunc("POST /api/v1/me/password", s.withPrincipalRaw(s.changeOwnPassword))
 	m.HandleFunc("GET /api/v1/me/applications", s.withPrincipal(s.myApplications))
 	m.HandleFunc("GET /api/v1/me/sessions", s.withPrincipal(s.mySessions))
 	m.HandleFunc("DELETE /api/v1/me/sessions/{id}", s.withPrincipal(s.revokeMySession))
@@ -80,6 +96,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/users/{id}/unlock", s.require("users.write", s.unlockUser))
 	m.HandleFunc("POST /api/v1/users/{id}/reset-password", s.require("users.write", s.resetUserPassword))
 	m.HandleFunc("POST /api/v1/users/{id}/sessions/revoke-all", s.require("sessions.write", s.revokeUserSessions))
+	m.HandleFunc("GET /api/v1/users/{id}/mfa", s.require("mfa.read", s.adminUserMFAStatus))
+	m.HandleFunc("POST /api/v1/users/{id}/mfa/reset", s.require("mfa.write", s.resetUserMFA))
 	m.HandleFunc("GET /api/v1/groups", s.require("groups.read", s.listGroups))
 	m.HandleFunc("POST /api/v1/groups", s.require("groups.write", s.createGroup))
 	m.HandleFunc("GET /api/v1/groups/{id}", s.require("groups.read", s.getGroup))
@@ -88,6 +106,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/groups/{id}/members", s.require("groups.read", s.listGroupMembers))
 	m.HandleFunc("POST /api/v1/groups/{id}/members", s.require("groups.write", s.addGroupMember))
 	m.HandleFunc("DELETE /api/v1/groups/{id}/members/{userId}", s.require("groups.write", s.removeGroupMember))
+	m.HandleFunc("GET /api/v1/groups/{id}/mfa-policy", s.require("mfa.read", s.groupMFAPolicy))
+	m.HandleFunc("PUT /api/v1/groups/{id}/mfa-policy", s.require("mfa.write", s.updateGroupMFAPolicy))
 	m.HandleFunc("GET /api/v1/applications", s.require("applications.read", s.listApplications))
 	m.HandleFunc("POST /api/v1/applications", s.require("applications.write", s.createApplication))
 	m.HandleFunc("GET /api/v1/applications/{id}/integration", s.require("applications.read", s.applicationIntegration))
@@ -98,6 +118,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/v1/applications/{id}/assign/users/{userId}", s.require("applications.write", s.removeApplicationUser))
 	m.HandleFunc("POST /api/v1/applications/{id}/assign/groups", s.require("applications.write", s.assignApplicationGroup))
 	m.HandleFunc("DELETE /api/v1/applications/{id}/assign/groups/{groupId}", s.require("applications.write", s.removeApplicationGroup))
+	m.HandleFunc("GET /api/v1/applications/{id}/mfa-policy", s.require("mfa.read", s.applicationMFAPolicy))
+	m.HandleFunc("PUT /api/v1/applications/{id}/mfa-policy", s.require("mfa.write", s.updateApplicationMFAPolicy))
 	m.HandleFunc("GET /api/v1/audit", s.require("audit.read", s.listAudit))
 	m.HandleFunc("GET /api/v1/roles", s.require("users.read", s.listRoles))
 	m.HandleFunc("GET /api/v1/users/{id}/roles", s.require("users.read", s.listUserRoles))
@@ -284,18 +306,31 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		problem(w, 401, "invalid credentials")
 		return
 	}
+
+	mfaStatus, e := s.mfa.Status(r.Context(), uid, nil)
+	if e != nil {
+		problem(w, 500, "MFA policy lookup failed")
+		return
+	}
+
 	token, e := security.RandomToken(32)
 	if e != nil {
 		problem(w, 500, "entropy failure")
 		return
 	}
 	expires := time.Now().Add(time.Duration(policy.SessionTTLMinutes) * time.Minute)
-	if _, e = s.db.Exec(r.Context(), "INSERT INTO sessions(user_id,token_hash,ip,user_agent,expires_at) VALUES($1,$2,$3,$4,$5)", uid, security.SHA256String(token), nullableIP(ip), truncate(r.UserAgent(), 512), expires); e != nil {
+	var sessionID string
+	if e = s.db.QueryRow(r.Context(), "INSERT INTO sessions(user_id,token_hash,ip,user_agent,expires_at) VALUES($1,$2,$3,$4,$5) RETURNING id", uid, security.SHA256String(token), nullableIP(ip), truncate(r.UserAgent(), 512), expires).Scan(&sessionID); e != nil {
 		problem(w, 500, "database error")
 		return
 	}
 	_, _ = s.db.Exec(r.Context(), "UPDATE users SET failed_logins=0,locked_until=NULL WHERE id=$1", uid)
-	_ = s.audit(r.Context(), &uid, "LOGIN_SUCCESS", "user", uid, "success", r)
+	if mfaStatus.Required {
+		_ = s.audit(r.Context(), &uid, "LOGIN_PRIMARY_SUCCESS", "user", uid, "success", r)
+	} else {
+		_ = s.audit(r.Context(), &uid, "LOGIN_SUCCESS", "user", uid, "success", r)
+	}
+
 	csrf, e := security.RandomToken(24)
 	if e != nil {
 		problem(w, 500, "entropy failure")
@@ -303,8 +338,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: "opensso_session", Value: token, Path: "/", HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
 	http.SetCookie(w, &http.Cookie{Name: "opensso_csrf", Value: csrf, Path: "/", HttpOnly: false, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, Expires: expires})
-	writeJSON(w, 200, map[string]any{"user_id": uid, "username": username, "expires_at": expires})
+	writeJSON(w, 200, map[string]any{
+		"user_id":                 uid,
+		"username":                username,
+		"session_id":              sessionID,
+		"expires_at":              expires,
+		"mfa_required":            mfaStatus.Required,
+		"mfa_enrollment_required": mfaStatus.Required && !mfaStatus.HasPrimaryFactor,
+	})
 }
+
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, e := r.Cookie("opensso_session"); e == nil {
 		_, _ = s.db.Exec(r.Context(), "UPDATE sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL", security.SHA256String(c.Value))
@@ -313,28 +356,66 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	_ = s.audit(r.Context(), &p.UserID, "LOGOUT", "user", p.UserID, "success", r)
 	http.SetCookie(w, &http.Cookie{Name: "opensso_session", Value: "", Path: "/", HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	http.SetCookie(w, &http.Cookie{Name: "opensso_csrf", Value: "", Path: "/", HttpOnly: false, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	w.WriteHeader(204)
+	w.WriteHeader(http.StatusNoContent)
 }
+
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, r.Context().Value(principalKey))
+	p := r.Context().Value(principalKey).(principal)
+	status, err := s.mfa.Status(r.Context(), p.UserID, nil)
+	if err != nil {
+		problem(w, 500, "MFA status lookup failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"session_id":              p.SessionID,
+		"user_id":                 p.UserID,
+		"username":                p.Username,
+		"must_change_password":    p.MustChangePassword,
+		"mfa_verified":            p.MFAVerified,
+		"mfa_required":            status.Required,
+		"mfa_enrollment_required": status.Required && !status.HasPrimaryFactor,
+	})
 }
-func (s *Server) withPrincipal(next http.HandlerFunc) http.HandlerFunc {
+
+func (s *Server) withPrincipalRaw(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, e := r.Cookie("opensso_session")
-		if e != nil {
+		cookie, err := r.Cookie("opensso_session")
+		if err != nil {
 			problem(w, 401, "authentication required")
 			return
 		}
 		var p principal
-		e = s.db.QueryRow(r.Context(), "SELECT u.id,u.username,u.must_change_password FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active=true", security.SHA256String(c.Value)).Scan(&p.UserID, &p.Username, &p.MustChangePassword)
-		if e != nil {
+		err = s.db.QueryRow(r.Context(), `
+			SELECT s.id,u.id,u.username,u.must_change_password,(s.mfa_verified_at IS NOT NULL)
+			FROM sessions s
+			JOIN users u ON u.id=s.user_id
+			WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.active=true
+		`, security.SHA256String(cookie.Value)).Scan(&p.SessionID, &p.UserID, &p.Username, &p.MustChangePassword, &p.MFAVerified)
+		if err != nil {
 			problem(w, 401, "authentication required")
 			return
 		}
-		_, _ = s.db.Exec(r.Context(), "UPDATE sessions SET last_seen_at=now() WHERE token_hash=$1", security.SHA256String(c.Value))
+		_, _ = s.db.Exec(r.Context(), "UPDATE sessions SET last_seen_at=now() WHERE id=$1", p.SessionID)
 		next(w, r.WithContext(context.WithValue(r.Context(), principalKey, p)))
 	}
 }
+
+func (s *Server) withPrincipal(next http.HandlerFunc) http.HandlerFunc {
+	return s.withPrincipalRaw(func(w http.ResponseWriter, r *http.Request) {
+		p := r.Context().Value(principalKey).(principal)
+		required, err := s.mfa.Required(r.Context(), p.UserID, nil)
+		if err != nil {
+			problem(w, 500, "MFA policy lookup failed")
+			return
+		}
+		if required && !p.MFAVerified {
+			problem(w, 403, "MFA verification required")
+			return
+		}
+		next(w, r)
+	})
+}
+
 func (s *Server) require(permission string, next http.HandlerFunc) http.HandlerFunc {
 	return s.withPrincipal(func(w http.ResponseWriter, r *http.Request) {
 		p := r.Context().Value(principalKey).(principal)
@@ -351,6 +432,7 @@ func (s *Server) require(permission string, next http.HandlerFunc) http.HandlerF
 		next(w, r)
 	})
 }
+
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	rows, e := s.db.Query(r.Context(), "SELECT id,username,email,display_name,active,must_change_password,locked_until,created_at FROM users ORDER BY username LIMIT 500")
 	if e != nil {

@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.13"
+          go-version: "1.26.6"
           cache-dependency-path: backend/go.mod
       - run: go mod tidy && git diff --exit-code
       - run: gofmt -w . && git diff --exit-code
@@ -55,7 +55,8 @@ jobs:
     env:
       POSTGRES_PASSWORD: e2e-postgres-password
       OPENSSO_BOOTSTRAP_TOKEN: 0123456789abcdefghijklmnopqrstuvwxyz
-      OPENSSO_PUBLIC_URL: http://127.0.0.1:8080
+      OPENSSO_PUBLIC_URL: http://localhost:8080
+      OPENSSO_E2E_URL: http://localhost:8080
       OPENSSO_COOKIE_SECURE: "false"
       OPENSSO_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
     steps:
