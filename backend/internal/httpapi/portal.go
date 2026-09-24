@@ -157,9 +157,13 @@ func (s *Server) revokeMySession(w http.ResponseWriter, r *http.Request) {
 func (s *Server) myApplications(w http.ResponseWriter, r *http.Request) {
 	p := r.Context().Value(principalKey).(principal)
 	rows, err := s.db.Query(r.Context(), `
-		SELECT DISTINCT a.id,a.name,c.client_id,c.initiate_login_uri
+		SELECT DISTINCT
+		       a.id,a.name,a.protocol,
+		       COALESCE(c.client_id,sp.entity_id,''),
+		       COALESCE(c.initiate_login_uri,sp.initiate_login_uri,'')
 		FROM applications a
-		JOIN oauth_clients c ON c.application_id=a.id
+		LEFT JOIN oauth_clients c ON c.application_id=a.id
+		LEFT JOIN saml_service_providers sp ON sp.application_id=a.id
 		WHERE a.enabled=true AND (
 			EXISTS(
 				SELECT 1 FROM application_user_assignments ua
@@ -181,15 +185,23 @@ func (s *Server) myApplications(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, name, clientID string
-		var initiateLoginURI *string
-		if err := rows.Scan(&id, &name, &clientID, &initiateLoginURI); err != nil {
+		var id, name, protocol, identifier, launchURL string
+		if err := rows.Scan(&id, &name, &protocol, &identifier, &launchURL); err != nil {
 			problem(w, 500, "database error")
 			return
 		}
 		items = append(items, map[string]any{
-			"id": id, "name": name, "client_id": clientID, "launch_url": initiateLoginURI,
+			"id": id, "name": name, "protocol": protocol,
+			"identifier": identifier, "client_id": identifier,
+			"launch_url": nullableString(launchURL),
 		})
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }

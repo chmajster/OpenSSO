@@ -15,6 +15,7 @@ import (
 	"github.com/chmajster/OpenSSO/backend/internal/config"
 	"github.com/chmajster/OpenSSO/backend/internal/mfa"
 	"github.com/chmajster/OpenSSO/backend/internal/oidc"
+	"github.com/chmajster/OpenSSO/backend/internal/samlidp"
 	"github.com/chmajster/OpenSSO/backend/internal/security"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,6 +29,7 @@ type Server struct {
 	log   *slog.Logger
 	keys  *oidc.KeyManager
 	mfa   *mfa.Service
+	saml  *samlidp.Runtime
 }
 type principal struct {
 	SessionID          string
@@ -41,8 +43,8 @@ type contextKey string
 const principalKey contextKey = "principal"
 const requestIDKey contextKey = "request_id"
 
-func New(cfg config.Config, db *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, keys *oidc.KeyManager, mfaService *mfa.Service) *Server {
-	return &Server{cfg: cfg, db: db, redis: rdb, log: log, keys: keys, mfa: mfaService}
+func New(cfg config.Config, db *pgxpool.Pool, rdb *redis.Client, log *slog.Logger, keys *oidc.KeyManager, mfaService *mfa.Service, saml *samlidp.Runtime) *Server {
+	return &Server{cfg: cfg, db: db, redis: rdb, log: log, keys: keys, mfa: mfaService, saml: saml}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -60,6 +62,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /userinfo", s.userinfo)
 	m.HandleFunc("GET /oauth2/logout", s.oauthLogout)
 	m.HandleFunc("POST /oauth2/logout", s.oauthLogout)
+	if s.saml != nil {
+		m.Handle("/saml/", s.saml.Handler())
+	}
 	m.HandleFunc("GET /api/v1/setup/status", s.setupStatus)
 	m.HandleFunc("POST /api/v1/setup/bootstrap", s.bootstrap)
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -127,6 +132,12 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("PUT /api/v1/security/policy", s.require("policies.write", s.updateSecurityPolicy))
 	m.HandleFunc("GET /api/v1/signing-keys", s.require("signing_keys.read", s.listSigningKeys))
 	m.HandleFunc("POST /api/v1/signing-keys/rotate", s.require("signing_keys.rotate", s.rotateSigningKey))
+	m.HandleFunc("POST /api/v1/saml/applications", s.require("saml.write", s.createSAMLApplication))
+	m.HandleFunc("PUT /api/v1/saml/applications/{id}", s.require("saml.write", s.updateSAMLApplication))
+	m.HandleFunc("GET /api/v1/saml/applications/{id}/integration", s.require("saml.read", s.samlApplicationIntegration))
+	m.HandleFunc("GET /api/v1/saml/certificates", s.require("saml.read", s.samlCertificates))
+	m.HandleFunc("POST /api/v1/saml/certificates/rotate", s.require("saml.rotate", s.rotateSAMLCertificate))
+	m.HandleFunc("POST /api/v1/saml/continue", s.withPrincipal(s.continueSAML))
 	return s.middleware(m)
 }
 
@@ -559,7 +570,21 @@ func (s *Server) addGroupMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
-	rows, e := s.db.Query(r.Context(), "SELECT a.id,a.name,a.protocol,a.enabled,c.client_id,c.public_client,c.require_pkce,c.allowed_scopes,c.initiate_login_uri,a.created_at FROM applications a JOIN oauth_clients c ON c.application_id=a.id ORDER BY a.name LIMIT 500")
+	rows, e := s.db.Query(r.Context(), `
+		SELECT a.id,a.name,a.protocol,a.enabled,
+		       COALESCE(c.client_id,''),
+		       COALESCE(c.public_client,false),
+		       COALESCE(c.require_pkce,false),
+		       COALESCE(c.allowed_scopes,ARRAY[]::text[]),
+		       COALESCE(c.initiate_login_uri,sp.initiate_login_uri,''),
+		       COALESCE(sp.entity_id,''),
+		       a.created_at
+		FROM applications a
+		LEFT JOIN oauth_clients c ON c.application_id=a.id
+		LEFT JOIN saml_service_providers sp ON sp.application_id=a.id
+		ORDER BY a.name
+		LIMIT 500
+	`)
 	if e != nil {
 		problem(w, 500, "database error")
 		return
@@ -567,16 +592,31 @@ func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, n, p, cid string
-		var enabled, pub, pkce bool
+		var id, name, protocol, clientID, initiateLoginURI, entityID string
+		var enabled, publicClient, requirePKCE bool
 		var scopes []string
-		var initiateLoginURI *string
 		var created time.Time
-		if rows.Scan(&id, &n, &p, &enabled, &cid, &pub, &pkce, &scopes, &initiateLoginURI, &created) != nil {
+		if rows.Scan(
+			&id, &name, &protocol, &enabled,
+			&clientID, &publicClient, &requirePKCE, &scopes,
+			&initiateLoginURI, &entityID, &created,
+		) != nil {
 			problem(w, 500, "database error")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": n, "protocol": p, "enabled": enabled, "client_id": cid, "public_client": pub, "require_pkce": pkce, "allowed_scopes": scopes, "initiate_login_uri": initiateLoginURI, "created_at": created})
+		items = append(items, map[string]any{
+			"id":                 id,
+			"name":               name,
+			"protocol":           protocol,
+			"enabled":            enabled,
+			"client_id":          clientID,
+			"entity_id":          entityID,
+			"public_client":      publicClient,
+			"require_pkce":       requirePKCE,
+			"allowed_scopes":     scopes,
+			"initiate_login_uri": initiateLoginURI,
+			"created_at":         created,
+		})
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
 }
