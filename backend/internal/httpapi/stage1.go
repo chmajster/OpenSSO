@@ -18,17 +18,18 @@ type securityPolicy struct {
 	LockoutThreshold      int  `json:"lockout_threshold"`
 	LockoutMinutes        int  `json:"lockout_minutes"`
 	SessionTTLMinutes     int  `json:"session_ttl_minutes"`
+	MFARequired           bool `json:"mfa_required"`
 }
 
 func (s *Server) getSecurityPolicy(r *http.Request) (securityPolicy, error) {
 	var p securityPolicy
 	err := s.db.QueryRow(r.Context(), `
 		SELECT password_min_length,password_require_upper,password_require_lower,password_require_digit,password_require_symbol,
-		       lockout_threshold,lockout_minutes,session_ttl_minutes
+		       lockout_threshold,lockout_minutes,session_ttl_minutes,mfa_required
 		FROM security_policies WHERE id=1
 	`).Scan(
 		&p.PasswordMinLength, &p.PasswordRequireUpper, &p.PasswordRequireLower, &p.PasswordRequireDigit, &p.PasswordRequireSymbol,
-		&p.LockoutThreshold, &p.LockoutMinutes, &p.SessionTTLMinutes,
+		&p.LockoutThreshold, &p.LockoutMinutes, &p.SessionTTLMinutes, &p.MFARequired,
 	)
 	return p, err
 }
@@ -57,10 +58,10 @@ func (s *Server) updateSecurityPolicy(w http.ResponseWriter, r *http.Request) {
 	_, err := s.db.Exec(r.Context(), `
 		UPDATE security_policies
 		SET password_min_length=$1,password_require_upper=$2,password_require_lower=$3,password_require_digit=$4,password_require_symbol=$5,
-		    lockout_threshold=$6,lockout_minutes=$7,session_ttl_minutes=$8,updated_at=now()
+		    lockout_threshold=$6,lockout_minutes=$7,session_ttl_minutes=$8,mfa_required=$9,updated_at=now()
 		WHERE id=1
 	`, in.PasswordMinLength, in.PasswordRequireUpper, in.PasswordRequireLower, in.PasswordRequireDigit, in.PasswordRequireSymbol,
-		in.LockoutThreshold, in.LockoutMinutes, in.SessionTTLMinutes)
+		in.LockoutThreshold, in.LockoutMinutes, in.SessionTTLMinutes, in.MFARequired)
 	if err != nil {
 		problem(w, 500, "database error")
 		return
@@ -228,6 +229,17 @@ func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	p := r.Context().Value(principalKey).(principal)
+	if !p.MustChangePassword {
+		required, err := s.mfa.Required(r.Context(), p.UserID, nil)
+		if err != nil {
+			problem(w, 500, "MFA policy lookup failed")
+			return
+		}
+		if required && !p.MFAVerified {
+			problem(w, 403, "MFA verification required before changing password")
+			return
+		}
+	}
 	var in struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
