@@ -10,7 +10,6 @@ import (
 
 	"github.com/chmajster/OpenSSO/backend/internal/config"
 	"github.com/zitadel/saml/pkg/provider"
-	"github.com/zitadel/saml/pkg/provider/serviceprovider"
 	"github.com/zitadel/saml/pkg/provider/signature"
 	samlxml "github.com/zitadel/saml/pkg/provider/xml"
 	"github.com/zitadel/saml/pkg/provider/xml/md"
@@ -193,19 +192,27 @@ func ValidateServiceProviderMetadata(metadataXML string) (entityID string, err e
 	if len(metadataXML) == 0 || len(metadataXML) > 1024*1024 {
 		return "", errors.New("SAML SP metadata must be between 1 byte and 1 MiB")
 	}
-	sp, err := serviceProviderForValidation(metadataXML)
+
+	// Parse and validate the metadata shape before constructing a
+	// serviceprovider.ServiceProvider. The upstream constructor currently
+	// dereferences SPSSODescriptor while extracting signing certificates,
+	// so malformed/non-SP metadata would otherwise panic instead of being
+	// rejected as a normal client validation error.
+	metadata, err := samlxml.ParseMetadataXmlIntoStruct([]byte(metadataXML))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("invalid SAML SP metadata: %w", err)
 	}
-	if sp.Metadata == nil || sp.Metadata.SPSSODescriptor == nil {
+	if metadata == nil || metadata.SPSSODescriptor == nil {
 		return "", errors.New("metadata does not contain SPSSODescriptor")
 	}
-	entityID = strings.TrimSpace(sp.GetEntityID())
+
+	entityID = strings.TrimSpace(string(metadata.EntityID))
 	if entityID == "" || len(entityID) > 2048 {
 		return "", errors.New("invalid SAML SP entityID")
 	}
+
 	hasPOSTACS := false
-	for _, acs := range sp.Metadata.SPSSODescriptor.AssertionConsumerService {
+	for _, acs := range metadata.SPSSODescriptor.AssertionConsumerService {
 		if acs.Binding == provider.PostBinding && strings.TrimSpace(acs.Location) != "" {
 			hasPOSTACS = true
 			break
@@ -215,12 +222,4 @@ func ValidateServiceProviderMetadata(metadataXML string) (entityID string, err e
 		return "", errors.New("SAML SP metadata must contain an HTTP-POST AssertionConsumerService")
 	}
 	return entityID, nil
-}
-
-func serviceProviderForValidation(metadataXML string) (*serviceprovider.ServiceProvider, error) {
-	return serviceprovider.NewServiceProvider(
-		"metadata-validation",
-		&serviceprovider.Config{Metadata: []byte(metadataXML)},
-		func(string) string { return "" },
-	)
 }
