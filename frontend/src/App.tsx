@@ -6,7 +6,7 @@ type Item = Record<string, unknown>;
 type View =
   | "my-apps" | "my-sessions" | "profile" | "mfa"
   | "dashboard" | "users" | "groups" | "roles" | "applications"
-  | "sessions" | "security" | "audit";
+  | "sessions" | "security" | "audit" | "provisioning";
 
 type Me = {
   UserID?: string;
@@ -149,6 +149,7 @@ export default function App(){
        view==="profile"?<ProfileView data={profile} loading={loading} onSaved={reload}/>:
        view==="mfa"?<MFASettings/>:
        view==="audit"?<AuditView/>:
+       view==="provisioning"?<ProvisioningView access={access} reload={reload}/>:
        view==="my-apps"?<MyApplications items={items} loading={loading}/>:
        view==="my-sessions"?<MySessions items={items} loading={loading} reload={reload}/>:
        <ResourceView view={view} items={items} loading={loading} reload={reload} access={access} canMFARead={hasPermission(access,"mfa.read")} canMFAWrite={hasPermission(access,"mfa.write")}/>}
@@ -165,6 +166,7 @@ function navigation(access:Access|null):View[]{
   if(hasPermission(access,"sessions.read"))result.push("sessions");
   if(hasPermission(access,"policies.read"))result.push("security");
   if(hasPermission(access,"audit.read"))result.push("audit");
+  if(hasPermission(access,"scim.read")||hasPermission(access,"ldap.read"))result.push("provisioning");
   return [...new Set(result)];
 }
 
@@ -542,8 +544,21 @@ function CheckField({name,label,checked}:{name:string;label:string;checked:boole
 function ErrorBox({text}:{text:string}){return <div className="error" role="alert">{text}</div>}
 function Centered({children}:{children:React.ReactNode}){return <div className="centered">{children}</div>}
 function render(v:unknown){if(Array.isArray(v))return v.join(", ");if(typeof v==="boolean")return v?"Yes":"No";if(v==null||v==="")return "—";return String(v)}
-function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile",mfa:"MFA"})[v]}
-function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials",mfa:"Authenticator, passkeys, security keys and recovery codes"})[v]}
+function ProvisioningView({access,reload}:{access:Access|null;reload:()=>void}){
+  const [tokens,setTokens]=useState<Item[]>([]),[providers,setProviders]=useState<Item[]>([]),[message,setMessage]=useState(""),[error,setError]=useState("");
+  const load=async()=>{setError("");try{if(hasPermission(access,"scim.read"))setTokens((await api("/api/v1/scim/tokens")).items||[]);if(hasPermission(access,"ldap.read"))setProviders((await api("/api/v1/ldap/providers")).items||[])}catch(e){setError((e as Error).message)}};
+  useEffect(()=>{void load()},[]);
+  const createToken=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);try{const x=await api("/api/v1/scim/tokens",{method:"POST",body:JSON.stringify({name:f.get("name"),scopes:["users.read","users.write","groups.read","groups.write"]})});setMessage("SCIM token (shown once): "+String(x.token));await load()}catch(x){setError((x as Error).message)}};
+  const createProvider=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await api("/api/v1/ldap/providers",{method:"POST",body:JSON.stringify({name:f.get("name"),enabled:true,host:f.get("host"),port:Number(f.get("port")),tls_mode:f.get("tls_mode"),skip_tls_verify:false,bind_dn:f.get("bind_dn"),bind_password:f.get("bind_password"),user_base_dn:f.get("user_base_dn"),user_filter:"(&(objectClass=person)(sAMAccountName={username}))",user_id_attribute:"objectGUID",username_attribute:"sAMAccountName",email_attribute:"mail",display_name_attribute:"displayName",group_base_dn:"",group_filter:"(objectClass=group)",group_name_attribute:"cn"})});e.currentTarget.reset();await load();reload()}catch(x){setError((x as Error).message)}};
+  return <div className="stack">{error&&<ErrorBox text={error}/>} {message&&<section className="card"><code>{message}</code></section>}
+    {hasPermission(access,"scim.read")&&<section className="card"><h2>SCIM 2.0</h2><p>Endpoint: <code>/scim/v2</code>. Tokens are stored hashed and the clear value is returned only at creation.</p>{hasPermission(access,"scim.write")&&<form onSubmit={createToken} className="inlineForm"><input name="name" required placeholder="Token name"/><button>Create token</button></form>}<table><thead><tr><th>Name</th><th>Scopes</th><th>Last used</th><th>Status</th></tr></thead><tbody>{tokens.map(x=><tr key={String(x.id)}><td>{String(x.name)}</td><td>{Array.isArray(x.scopes)?x.scopes.join(", "):""}</td><td>{String(x.last_used_at||"Never")}</td><td>{x.revoked_at?"Revoked":"Active"}</td></tr>)}</tbody></table></section>}
+    {hasPermission(access,"ldap.read")&&<section className="card"><h2>LDAP / Active Directory</h2>{hasPermission(access,"ldap.write")&&<form onSubmit={createProvider} className="formGrid"><input name="name" required placeholder="Provider name"/><input name="host" required placeholder="ldap.example.com"/><input name="port" type="number" defaultValue="636" required/><select name="tls_mode" defaultValue="ldaps"><option value="ldaps">LDAPS</option><option value="starttls">StartTLS</option></select><input name="bind_dn" placeholder="CN=svc,OU=Service,DC=example,DC=com"/><input name="bind_password" type="password" placeholder="Bind password"/><input name="user_base_dn" required placeholder="OU=Users,DC=example,DC=com"/><button>Create provider</button></form>}<table><thead><tr><th>Name</th><th>Host</th><th>TLS</th><th>Enabled</th><th>Actions</th></tr></thead><tbody>{providers.map(x=><tr key={String(x.id)}><td>{String(x.name)}</td><td>{String(x.host)}:{String(x.port)}</td><td>{String(x.tls_mode)}</td><td>{String(x.enabled)}</td><td>{hasPermission(access,"ldap.write")&&<button onClick={()=>void api("/api/v1/ldap/providers/"+x.id+"/test",{method:"POST"}).then(()=>setMessage("LDAP connection successful")).catch(e=>setError(e.message))}>Test</button>}</td></tr>)}</tbody></table></section>}
+  </div>
+}
+
+
+function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile",mfa:"MFA",provisioning:"Provisioning"})[v]}
+function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials",mfa:"Authenticator, passkeys, security keys and recovery codes",provisioning:"SCIM provisioning and LDAP/Active Directory federation"})[v]}
 function columns(v:View){return ({
   users:["id","username","email","display_name","active","must_change_password","locked_until","created_at"],
   groups:["id","name","description","created_at"],
@@ -551,5 +566,5 @@ function columns(v:View){return ({
   applications:["id","name","protocol","client_id","entity_id","enabled","initiate_login_uri","created_at"],
   sessions:["id","username","ip","user_agent","last_seen_at","expires_at"],
   audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"],
-  dashboard:[],security:[],profile:[],mfa:[],"my-apps":[],"my-sessions":[]
+  dashboard:[],security:[],profile:[],mfa:[],provisioning:[],"my-apps":[],"my-sessions":[]
 })[v]||[]}

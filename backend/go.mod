@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	github.com/beevik/etree v1.7.1
 	github.com/go-webauthn/webauthn v0.18.2
+	github.com/go-ldap/ldap/v3 v3.4.12
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pquerna/otp v1.5.0

@@ -65,6 +65,21 @@ func (s *Server) Handler() http.Handler {
 	if s.saml != nil {
 		m.Handle("/saml/", s.saml.Handler())
 	}
+	m.HandleFunc("GET /scim/v2/ServiceProviderConfig", s.scimConfig)
+	m.HandleFunc("GET /scim/v2/ResourceTypes", s.scimResourceTypes)
+	m.HandleFunc("GET /scim/v2/Schemas", s.scimSchemas)
+	m.HandleFunc("GET /scim/v2/Users", s.scimUsers)
+	m.HandleFunc("POST /scim/v2/Users", s.scimUsers)
+	m.HandleFunc("GET /scim/v2/Users/{id}", s.scimUserResource)
+	m.HandleFunc("PUT /scim/v2/Users/{id}", s.scimUserResource)
+	m.HandleFunc("PATCH /scim/v2/Users/{id}", s.scimUserPatch)
+	m.HandleFunc("DELETE /scim/v2/Users/{id}", s.scimUserResource)
+	m.HandleFunc("GET /scim/v2/Groups", s.scimGroups)
+	m.HandleFunc("POST /scim/v2/Groups", s.scimGroups)
+	m.HandleFunc("GET /scim/v2/Groups/{id}", s.scimGroupResource)
+	m.HandleFunc("PUT /scim/v2/Groups/{id}", s.scimGroupResource)
+	m.HandleFunc("PATCH /scim/v2/Groups/{id}", s.scimGroupPatch)
+	m.HandleFunc("DELETE /scim/v2/Groups/{id}", s.scimGroupResource)
 	m.HandleFunc("GET /api/v1/setup/status", s.setupStatus)
 	m.HandleFunc("POST /api/v1/setup/bootstrap", s.bootstrap)
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -135,6 +150,15 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/saml/applications", s.require("saml.write", s.createSAMLApplication))
 	m.HandleFunc("PUT /api/v1/saml/applications/{id}", s.require("saml.write", s.updateSAMLApplication))
 	m.HandleFunc("GET /api/v1/saml/applications/{id}/integration", s.require("saml.read", s.samlApplicationIntegration))
+	m.HandleFunc("GET /api/v1/scim/tokens", s.require("scim.read", s.scimTokens))
+	m.HandleFunc("POST /api/v1/scim/tokens", s.require("scim.write", s.scimTokens))
+	m.HandleFunc("DELETE /api/v1/scim/tokens/{id}", s.require("scim.write", s.revokeSCIMToken))
+	m.HandleFunc("GET /api/v1/ldap/providers", s.require("ldap.read", s.listLDAPProviders))
+	m.HandleFunc("POST /api/v1/ldap/providers", s.require("ldap.write", s.createLDAPProvider))
+	m.HandleFunc("PUT /api/v1/ldap/providers/{id}", s.require("ldap.write", s.updateLDAPProvider))
+	m.HandleFunc("DELETE /api/v1/ldap/providers/{id}", s.require("ldap.write", s.deleteLDAPProvider))
+	m.HandleFunc("POST /api/v1/ldap/providers/{id}/test", s.require("ldap.write", s.testLDAPProvider))
+	m.HandleFunc("POST /api/v1/ldap/providers/{id}/sync", s.require("ldap.write", s.syncLDAPProvider))
 	m.HandleFunc("GET /api/v1/saml/certificates", s.require("saml.read", s.samlCertificates))
 	m.HandleFunc("POST /api/v1/saml/certificates/rotate", s.require("saml.rotate", s.rotateSAMLCertificate))
 	m.HandleFunc("POST /api/v1/saml/continue", s.withPrincipal(s.continueSAML))
@@ -293,13 +317,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if decodeJSON(w, r, &in) != nil {
 		return
 	}
-	var uid, username, hash string
-	var active bool
-	var locked *time.Time
-	e := s.db.QueryRow(r.Context(), "SELECT u.id,u.username,u.active,u.locked_until,p.password_hash FROM users u JOIN password_credentials p ON p.user_id=u.id WHERE lower(u.username)=lower($1) OR lower(u.email)=lower($1)", strings.TrimSpace(in.Username)).Scan(&uid, &username, &active, &locked, &hash)
-	valid := e == nil && active && (locked == nil || locked.Before(time.Now())) && security.VerifyPassword(hash, in.Password)
-	if !valid {
-		if e == nil {
+	authn, e := s.authenticatePrimary(r.Context(), in.Username, in.Password)
+	uid, username := authn.UserID, authn.Username
+	if e != nil || !authn.Valid {
+		if authn.Local && uid != "" {
 			_, _ = s.db.Exec(r.Context(), "UPDATE users SET failed_logins=failed_logins+1,locked_until=CASE WHEN failed_logins+1 >= $2 THEN now()+make_interval(mins => $3) ELSE locked_until END WHERE id=$1", uid, policy.LockoutThreshold, policy.LockoutMinutes)
 		}
 		_ = s.audit(r.Context(), nil, "LOGIN_FAILED", "user", uid, "failure", r)
