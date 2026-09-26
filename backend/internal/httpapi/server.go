@@ -314,13 +314,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if decodeJSON(w, r, &in) != nil {
 		return
 	}
-	var uid, username, hash string
-	var active bool
-	var locked *time.Time
-	e := s.db.QueryRow(r.Context(), "SELECT u.id,u.username,u.active,u.locked_until,p.password_hash FROM users u JOIN password_credentials p ON p.user_id=u.id WHERE lower(u.username)=lower($1) OR lower(u.email)=lower($1)", strings.TrimSpace(in.Username)).Scan(&uid, &username, &active, &locked, &hash)
-	valid := e == nil && active && (locked == nil || locked.Before(time.Now())) && security.VerifyPassword(hash, in.Password)
-	if !valid {
-		if e == nil {
+	authn, e := s.authenticatePrimary(r.Context(), in.Username, in.Password)
+	uid, username := authn.UserID, authn.Username
+	if e != nil || !authn.Valid {
+		if authn.Local && uid != "" {
 			_, _ = s.db.Exec(r.Context(), "UPDATE users SET failed_logins=failed_logins+1,locked_until=CASE WHEN failed_logins+1 >= $2 THEN now()+make_interval(mins => $3) ELSE locked_until END WHERE id=$1", uid, policy.LockoutThreshold, policy.LockoutMinutes)
 		}
 		_ = s.audit(r.Context(), nil, "LOGIN_FAILED", "user", uid, "failure", r)
