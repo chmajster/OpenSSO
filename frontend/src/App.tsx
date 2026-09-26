@@ -557,8 +557,8 @@ function ProvisioningView({access,reload}:{access:Access|null;reload:()=>void}){
 }
 
 
-function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile",mfa:"MFA"})[v]}
-function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials",mfa:"Authenticator, passkeys, security keys and recovery codes"})[v]}
+function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile",mfa:"MFA",provisioning:"Provisioning"})[v]}
+function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials",mfa:"Authenticator, passkeys, security keys and recovery codes",provisioning:"SCIM provisioning and LDAP/Active Directory federation"})[v]}
 function columns(v:View){return ({
   users:["id","username","email","display_name","active","must_change_password","locked_until","created_at"],
   groups:["id","name","description","created_at"],
@@ -566,5 +566,5 @@ function columns(v:View){return ({
   applications:["id","name","protocol","client_id","entity_id","enabled","initiate_login_uri","created_at"],
   sessions:["id","username","ip","user_agent","last_seen_at","expires_at"],
   audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"],
-  dashboard:[],security:[],profile:[],mfa:[],"my-apps":[],"my-sessions":[]
+  dashboard:[],security:[],profile:[],mfa:[],provisioning:[],"my-apps":[],"my-sessions":[]
 })[v]||[]}
