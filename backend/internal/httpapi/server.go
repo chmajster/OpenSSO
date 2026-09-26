@@ -156,6 +156,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("PUT /api/v1/ldap/providers/{id}", s.require("ldap.write", s.updateLDAPProvider))
 	m.HandleFunc("DELETE /api/v1/ldap/providers/{id}", s.require("ldap.write", s.deleteLDAPProvider))
 	m.HandleFunc("POST /api/v1/ldap/providers/{id}/test", s.require("ldap.write", s.testLDAPProvider))
+	m.HandleFunc("POST /api/v1/ldap/providers/{id}/sync", s.require("ldap.write", s.syncLDAPProvider))
 	m.HandleFunc("GET /api/v1/saml/certificates", s.require("saml.read", s.samlCertificates))
 	m.HandleFunc("POST /api/v1/saml/certificates/rotate", s.require("saml.rotate", s.rotateSAMLCertificate))
 	m.HandleFunc("POST /api/v1/saml/continue", s.withPrincipal(s.continueSAML))
