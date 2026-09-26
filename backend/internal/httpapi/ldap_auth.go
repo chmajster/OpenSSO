@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/chmajster/OpenSSO/backend/internal/security"
 	"github.com/jackc/pgx/v5"
@@ -19,9 +20,9 @@ type primaryAuthResult struct {
 func (s *Server) authenticatePrimary(ctx context.Context, login, password string) (primaryAuthResult, error) {
 	var uid, username, hash string
 	var active bool
-	var locked any
+	var locked *time.Time
 	err := s.db.QueryRow(ctx, "SELECT u.id,u.username,u.active,u.locked_until,p.password_hash FROM users u JOIN password_credentials p ON p.user_id=u.id WHERE lower(u.username)=lower($1) OR lower(u.email)=lower($1)", strings.TrimSpace(login)).Scan(&uid, &username, &active, &locked, &hash)
-	if err == nil && active && security.VerifyPassword(hash, password) {
+	if err == nil && active && (locked == nil || locked.Before(time.Now())) && security.VerifyPassword(hash, password) {
 		return primaryAuthResult{UserID: uid, Username: username, Valid: true, Local: true}, nil
 	}
 	// A local account with a password is authoritative. Do not silently fall
