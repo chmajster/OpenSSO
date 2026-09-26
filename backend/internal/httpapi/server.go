@@ -65,6 +65,12 @@ func (s *Server) Handler() http.Handler {
 	if s.saml != nil {
 		m.Handle("/saml/", s.saml.Handler())
 	}
+	m.HandleFunc("GET /scim/v2/ServiceProviderConfig", s.scimConfig)
+	m.HandleFunc("GET /scim/v2/Users", s.scimUsers)
+	m.HandleFunc("POST /scim/v2/Users", s.scimUsers)
+	m.HandleFunc("GET /scim/v2/Users/{id}", s.scimUserResource)
+	m.HandleFunc("PUT /scim/v2/Users/{id}", s.scimUserResource)
+	m.HandleFunc("DELETE /scim/v2/Users/{id}", s.scimUserResource)
 	m.HandleFunc("GET /api/v1/setup/status", s.setupStatus)
 	m.HandleFunc("POST /api/v1/setup/bootstrap", s.bootstrap)
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -135,6 +141,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/saml/applications", s.require("saml.write", s.createSAMLApplication))
 	m.HandleFunc("PUT /api/v1/saml/applications/{id}", s.require("saml.write", s.updateSAMLApplication))
 	m.HandleFunc("GET /api/v1/saml/applications/{id}/integration", s.require("saml.read", s.samlApplicationIntegration))
+	m.HandleFunc("GET /api/v1/scim/tokens", s.require("scim.read", s.scimTokens))
+	m.HandleFunc("POST /api/v1/scim/tokens", s.require("scim.write", s.scimTokens))
+	m.HandleFunc("DELETE /api/v1/scim/tokens/{id}", s.require("scim.write", s.revokeSCIMToken))
 	m.HandleFunc("GET /api/v1/saml/certificates", s.require("saml.read", s.samlCertificates))
 	m.HandleFunc("POST /api/v1/saml/certificates/rotate", s.require("saml.rotate", s.rotateSAMLCertificate))
 	m.HandleFunc("POST /api/v1/saml/continue", s.withPrincipal(s.continueSAML))
