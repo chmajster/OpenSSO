@@ -40,11 +40,26 @@ func TestNormalizeLoginUIAllowsRootRelativeMedia(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeLoginUIRejectsMalformedRootRelativeMedia(t *testing.T) {
 	in := defaultLoginUISettings()
 	in.LogoURL = "/logo.svg\");background-image:url(https://example.test/x)"
 	if _, err := normalizeLoginUISettings(in); err == nil {
 		t.Fatal("expected malformed root-relative media URL to be rejected")
+	}
+}
+
+func TestNormalizeLoginUIAcceptsUnicodeWithinCharacterLimit(t *testing.T) {
+	in := defaultLoginUISettings()
+	in.BrandName = "Zażółć gęślą jaźń"
+	if _, err := normalizeLoginUISettings(in); err != nil {
+		t.Fatalf("expected Unicode branding to be accepted: %v", err)
+	}
+}
+
+func TestNormalizeLoginUIRejectsOversizedMediaURL(t *testing.T) {
+	in := defaultLoginUISettings()
+	in.LogoURL = "https://example.test/" + string(make([]byte, 2050))
+	if _, err := normalizeLoginUISettings(in); err == nil {
+		t.Fatal("expected oversized media URL to be rejected")
 	}
 }
