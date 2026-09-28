@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 type loginUISettings struct {
@@ -79,13 +80,13 @@ func normalizeLoginUISettings(in loginUISettings) (loginUISettings, error) {
 	in.NoticeText = strings.TrimSpace(in.NoticeText)
 	in.FooterText = strings.TrimSpace(in.FooterText)
 
-	if in.BrandName == "" || len(in.BrandName) > 100 {
+	if in.BrandName == "" || utf8.RuneCountInString(in.BrandName) > 100 {
 		return in, fmt.Errorf("brand_name must contain 1-100 characters")
 	}
-	if in.Heading == "" || len(in.Heading) > 120 {
+	if in.Heading == "" || utf8.RuneCountInString(in.Heading) > 120 {
 		return in, fmt.Errorf("heading must contain 1-120 characters")
 	}
-	if len(in.Subheading) > 240 || len(in.NoticeText) > 500 || len(in.FooterText) > 240 {
+	if utf8.RuneCountInString(in.Subheading) > 240 || utf8.RuneCountInString(in.NoticeText) > 500 || utf8.RuneCountInString(in.FooterText) > 240 {
 		return in, fmt.Errorf("login UI text exceeds allowed length")
 	}
 	if in.CardRadius < 0 || in.CardRadius > 48 {
@@ -93,6 +94,9 @@ func normalizeLoginUISettings(in loginUISettings) (loginUISettings, error) {
 	}
 	if in.CardWidth < 320 || in.CardWidth > 720 {
 		return in, fmt.Errorf("card_width must be between 320 and 720")
+	}
+	if len(in.LogoURL) > 2048 || len(in.BackgroundImageURL) > 2048 {
+		return in, fmt.Errorf("login UI media URL exceeds 2048 bytes")
 	}
 	for name, value := range map[string]string{
 		"background_color": in.BackgroundColor,
