@@ -398,6 +398,57 @@ paths:
       responses:
         "200": { description: Number of revoked sessions }
 
+  /api/v1/public/login-ui:
+    get:
+      tags: [Branding]
+      summary: Read the effective public login UI configuration
+      responses:
+        "200":
+          description: Effective login UI configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginUISettings" }
+
+  /api/v1/branding/login-ui:
+    get:
+      tags: [Branding]
+      summary: Read the persisted login UI configuration
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200":
+          description: Persisted login UI configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginUISettings" }
+    put:
+      tags: [Branding]
+      summary: Replace the login UI configuration
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginUISettings" }
+      responses:
+        "200":
+          description: Updated login UI configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginUISettings" }
+        "400": { description: Invalid branding configuration }
+
+  /api/v1/branding/login-ui/reset:
+    post:
+      tags: [Branding]
+      summary: Reset the login UI to OpenSSO defaults
+      security: [{ sessionCookie: [], csrfHeader: [] }]
+      responses:
+        "200":
+          description: Default login UI configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginUISettings" }
+
   /api/v1/security/policy:
     get:
       tags: [Security]
@@ -441,6 +492,168 @@ paths:
         "200": { description: Audit events }
 
 components:
+  schemas:
+    LoginUISettings:
+      type: object
+      required:
+        - enabled
+        - brand_name
+        - heading
+        - subheading
+        - logo_url
+        - background_image_url
+        - background_color
+        - card_color
+        - text_color
+        - muted_text_color
+        - primary_color
+        - input_background_color
+        - border_color
+        - card_radius
+        - card_width
+        - notice_text
+        - footer_text
+        - show_brand_name
+        - show_footer
+      properties:
+        enabled: { type: boolean }
+        brand_name: { type: string, minLength: 1, maxLength: 100 }
+        heading: { type: string, minLength: 1, maxLength: 120 }
+        subheading: { type: string, maxLength: 240 }
+        logo_url: { type: string, description: Absolute http(s) URL or root-relative path }
+        background_image_url: { type: string, description: Absolute http(s) URL or root-relative path }
+        background_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: opensso_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+    bootstrapToken:
+      type: http
+      scheme: bearer
+ }
+        card_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: opensso_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+    bootstrapToken:
+      type: http
+      scheme: bearer
+ }
+        text_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: opensso_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+    bootstrapToken:
+      type: http
+      scheme: bearer
+ }
+        muted_text_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: opensso_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+    bootstrapToken:
+      type: http
+      scheme: bearer
+ }
+        primary_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: opensso_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+    bootstrapToken:
+      type: http
+      scheme: bearer
+ }
+        input_background_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: opensso_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+    bootstrapToken:
+      type: http
+      scheme: bearer
+ }
+        border_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: opensso_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+    bootstrapToken:
+      type: http
+      scheme: bearer
+ }
+        card_radius: { type: integer, minimum: 0, maximum: 48 }
+        card_width: { type: integer, minimum: 320, maximum: 720 }
+        notice_text: { type: string, maxLength: 500 }
+        footer_text: { type: string, maxLength: 240 }
+        show_brand_name: { type: boolean }
+        show_footer: { type: boolean }
   parameters:
     Id:
       name: id
