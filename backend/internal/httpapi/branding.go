@@ -120,11 +120,17 @@ func validateLoginUIMediaURL(raw string) error {
 	if raw == "" {
 		return nil
 	}
-	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") {
+	u, err := url.ParseRequestURI(raw)
+	if err != nil || u.Fragment != "" || u.User != nil {
+		return fmt.Errorf("must be an absolute http(s) URL or a root-relative path")
+	}
+	if strings.HasPrefix(raw, "/") {
+		if strings.HasPrefix(raw, "//") || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(u.Path, "/") {
+			return fmt.Errorf("must be an absolute http(s) URL or a root-relative path")
+		}
 		return nil
 	}
-	u, err := url.ParseRequestURI(raw)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+	if u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return fmt.Errorf("must be an absolute http(s) URL or a root-relative path")
 	}
 	return nil
