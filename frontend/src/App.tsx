@@ -6,7 +6,7 @@ type Item = Record<string, unknown>;
 type View =
   | "my-apps" | "my-sessions" | "profile" | "mfa"
   | "dashboard" | "users" | "groups" | "roles" | "applications"
-  | "sessions" | "security" | "audit";
+  | "sessions" | "security" | "audit" | "login-ui";
 
 type Me = {
   UserID?: string;
@@ -21,6 +21,50 @@ type Me = {
 };
 
 type Access = { roles:string[]; permissions:string[] };
+
+type LoginUISettings = {
+  enabled:boolean;
+  brand_name:string;
+  heading:string;
+  subheading:string;
+  logo_url:string;
+  background_image_url:string;
+  background_color:string;
+  card_color:string;
+  text_color:string;
+  muted_text_color:string;
+  primary_color:string;
+  input_background_color:string;
+  border_color:string;
+  card_radius:number;
+  card_width:number;
+  notice_text:string;
+  footer_text:string;
+  show_brand_name:boolean;
+  show_footer:boolean;
+};
+
+const defaultLoginUI:LoginUISettings={
+  enabled:false,
+  brand_name:"OpenSSO",
+  heading:"Sign in",
+  subheading:"Use your OpenSSO account.",
+  logo_url:"",
+  background_image_url:"",
+  background_color:"#0b1020",
+  card_color:"#11192d",
+  text_color:"#e8edf5",
+  muted_text_color:"#9db0ca",
+  primary_color:"#5b7cfa",
+  input_background_color:"#0d1526",
+  border_color:"#223150",
+  card_radius:16,
+  card_width:460,
+  notice_text:"",
+  footer_text:"",
+  show_brand_name:true,
+  show_footer:false,
+};
 
 async function continueAuthorization(){
   const params=new URLSearchParams(window.location.search);
@@ -151,6 +195,7 @@ export default function App(){
        view==="audit"?<AuditView/>:
        view==="my-apps"?<MyApplications items={items} loading={loading}/>:
        view==="my-sessions"?<MySessions items={items} loading={loading} reload={reload}/>:
+       view==="login-ui"?<LoginUIEditor/>:
        <ResourceView view={view} items={items} loading={loading} reload={reload} access={access} canMFARead={hasPermission(access,"mfa.read")} canMFAWrite={hasPermission(access,"mfa.write")}/>}
     </main>
   </div>;
@@ -165,6 +210,7 @@ function navigation(access:Access|null):View[]{
   if(hasPermission(access,"sessions.read"))result.push("sessions");
   if(hasPermission(access,"policies.read"))result.push("security");
   if(hasPermission(access,"audit.read"))result.push("audit");
+  if(hasPermission(access,"branding.read"))result.push("login-ui");
   return [...new Set(result)];
 }
 
@@ -184,6 +230,12 @@ function Bootstrap({onDone}:{onDone:()=>Promise<void>}){
 
 function Login({onDone}:{onDone:()=>Promise<void>}){
   const [busy,setBusy]=useState(false),[error,setError]=useState("");
+  const [theme,setTheme]=useState<LoginUISettings>(defaultLoginUI);
+  useEffect(()=>{
+    let active=true;
+    api("/api/v1/public/login-ui").then((data:LoginUISettings)=>{if(active)setTheme({...defaultLoginUI,...data})}).catch(()=>{});
+    return()=>{active=false};
+  },[]);
   const submit=async(e:FormEvent<HTMLFormElement>)=>{
     e.preventDefault();setBusy(true);setError("");const f=new FormData(e.currentTarget);
     try{
@@ -192,7 +244,35 @@ function Login({onDone}:{onDone:()=>Promise<void>}){
       await continueAuthorization();
     }catch(x){setError((x as Error).message)}finally{setBusy(false)}
   };
-  return <Centered><section className="card auth"><h1>Sign in</h1><p>Use your OpenSSO local account.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit}><Field name="username" label="Username or email"/><Field name="password" label="Password" type="password"/><button disabled={busy}>{busy?"Signing in…":"Sign in"}</button></form></section></Centered>
+  const screenStyle={
+    backgroundColor:theme.background_color,
+    backgroundImage:theme.background_image_url?`linear-gradient(rgba(4,8,18,.38),rgba(4,8,18,.38)),url("${theme.background_image_url}")`:undefined,
+    color:theme.text_color,
+  };
+  const cardStyle={
+    backgroundColor:theme.card_color,
+    borderColor:theme.border_color,
+    borderRadius:theme.card_radius,
+    maxWidth:theme.card_width,
+    color:theme.text_color,
+    "--login-primary":theme.primary_color,
+    "--login-input":theme.input_background_color,
+    "--login-border":theme.border_color,
+    "--login-text":theme.text_color,
+    "--login-muted":theme.muted_text_color,
+  } as React.CSSProperties;
+  return <div className="loginScreen" style={screenStyle}>
+    <section className="card auth loginCustomCard" style={cardStyle}>
+      {theme.logo_url&&<img className="loginLogo" src={theme.logo_url} alt=""/>}
+      {theme.show_brand_name&&<div className="loginBrand">{theme.brand_name}</div>}
+      <h1>{theme.heading}</h1>
+      {theme.subheading&&<p className="loginSubtitle">{theme.subheading}</p>}
+      {theme.notice_text&&<div className="loginNotice">{theme.notice_text}</div>}
+      {error&&<ErrorBox text={error}/>}
+      <form onSubmit={submit}><Field name="username" label="Username or email"/><Field name="password" label="Password" type="password"/><button disabled={busy}>{busy?"Signing in…":"Sign in"}</button></form>
+      {theme.show_footer&&theme.footer_text&&<footer className="loginFooter">{theme.footer_text}</footer>}
+    </section>
+  </div>
 }
 
 function ChangePassword({onDone}:{onDone:()=>Promise<void>}){
@@ -206,6 +286,112 @@ function ChangePassword({onDone}:{onDone:()=>Promise<void>}){
     }catch(x){setError((x as Error).message)}finally{setBusy(false)}
   };
   return <Centered><section className="card auth"><h1>Password change required</h1><p>Your administrator requires a new password before normal access is granted.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit}><Field name="current_password" label="Current password" type="password"/><Field name="new_password" label="New password" type="password" minLength={12}/><button disabled={busy}>{busy?"Changing…":"Change password"}</button></form></section></Centered>
+}
+
+function LoginUIEditor(){
+  const [theme,setTheme]=useState<LoginUISettings|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [done,setDone]=useState("");
+
+  const load=async()=>{
+    setError("");
+    try{setTheme({...defaultLoginUI,...await api("/api/v1/branding/login-ui")})}
+    catch(x){setError((x as Error).message)}
+  };
+  useEffect(()=>{void load()},[]);
+
+  const patch=(next:Partial<LoginUISettings>)=>setTheme(current=>current?{...current,...next}:current);
+  const save=async(e:FormEvent<HTMLFormElement>)=>{
+    e.preventDefault();
+    if(!theme)return;
+    setBusy(true);setError("");setDone("");
+    try{
+      const saved=await api("/api/v1/branding/login-ui",{method:"PUT",body:JSON.stringify(theme)});
+      setTheme({...defaultLoginUI,...saved});
+      setDone("Login UI saved.");
+    }catch(x){setError((x as Error).message)}finally{setBusy(false)}
+  };
+  const reset=async()=>{
+    if(!window.confirm("Reset the login UI to the OpenSSO defaults?"))return;
+    setBusy(true);setError("");setDone("");
+    try{
+      const saved=await api("/api/v1/branding/login-ui/reset",{method:"POST"});
+      setTheme({...defaultLoginUI,...saved});
+      setDone("Login UI reset to defaults.");
+    }catch(x){setError((x as Error).message)}finally{setBusy(false)}
+  };
+
+  if(!theme)return <section className="card"><p>Loading login UI configuration…</p>{error&&<ErrorBox text={error}/>}</section>;
+  return <div className="loginUiEditor">
+    <section className="card">
+      <h2>Custom login UI</h2>
+      <p className="muted">Configure a safe branded sign-in page without injecting custom HTML or JavaScript.</p>
+      {error&&<ErrorBox text={error}/>}
+      {done&&<div className="success">{done}</div>}
+      <form className="loginUiForm" onSubmit={save}>
+        <label className="check policyCheck"><input type="checkbox" checked={theme.enabled} onChange={e=>patch({enabled:e.target.checked})}/><span>Enable custom login UI</span></label>
+        <label className="check policyCheck"><input type="checkbox" checked={theme.show_brand_name} onChange={e=>patch({show_brand_name:e.target.checked})}/><span>Show brand name</span></label>
+        <label className="check policyCheck"><input type="checkbox" checked={theme.show_footer} onChange={e=>patch({show_footer:e.target.checked})}/><span>Show footer</span></label>
+        <label><span>Brand name</span><input maxLength={100} value={theme.brand_name} onChange={e=>patch({brand_name:e.target.value})}/></label>
+        <label><span>Heading</span><input maxLength={120} value={theme.heading} onChange={e=>patch({heading:e.target.value})}/></label>
+        <label className="wide"><span>Subheading</span><input maxLength={240} value={theme.subheading} onChange={e=>patch({subheading:e.target.value})}/></label>
+        <label className="wide"><span>Logo URL</span><input placeholder="https://… or /branding/logo.svg" value={theme.logo_url} onChange={e=>patch({logo_url:e.target.value})}/></label>
+        <label className="wide"><span>Background image URL</span><input placeholder="https://… or /branding/background.webp" value={theme.background_image_url} onChange={e=>patch({background_image_url:e.target.value})}/></label>
+        <label className="wide"><span>Notice text</span><textarea maxLength={500} rows={3} value={theme.notice_text} onChange={e=>patch({notice_text:e.target.value})}/></label>
+        <label className="wide"><span>Footer text</span><input maxLength={240} value={theme.footer_text} onChange={e=>patch({footer_text:e.target.value})}/></label>
+        <ThemeColor label="Background" value={theme.background_color} onChange={value=>patch({background_color:value})}/>
+        <ThemeColor label="Card" value={theme.card_color} onChange={value=>patch({card_color:value})}/>
+        <ThemeColor label="Text" value={theme.text_color} onChange={value=>patch({text_color:value})}/>
+        <ThemeColor label="Muted text" value={theme.muted_text_color} onChange={value=>patch({muted_text_color:value})}/>
+        <ThemeColor label="Primary" value={theme.primary_color} onChange={value=>patch({primary_color:value})}/>
+        <ThemeColor label="Input background" value={theme.input_background_color} onChange={value=>patch({input_background_color:value})}/>
+        <ThemeColor label="Border" value={theme.border_color} onChange={value=>patch({border_color:value})}/>
+        <label><span>Card width (px)</span><input type="number" min={320} max={720} value={theme.card_width} onChange={e=>patch({card_width:Number(e.target.value)})}/></label>
+        <label><span>Card radius (px)</span><input type="number" min={0} max={48} value={theme.card_radius} onChange={e=>patch({card_radius:Number(e.target.value)})}/></label>
+        <div className="actions wide"><button disabled={busy}>{busy?"Saving…":"Save login UI"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>void reset()}>Reset defaults</button></div>
+      </form>
+    </section>
+    <section className="card loginPreviewPanel">
+      <h2>Live preview</h2>
+      <LoginUIPreview theme={theme}/>
+    </section>
+  </div>;
+}
+
+function ThemeColor({label,value,onChange}:{label:string;value:string;onChange:(value:string)=>void}){
+  return <label><span>{label}</span><div className="colorInput"><input type="color" value={value} onChange={e=>onChange(e.target.value)}/><input value={value} maxLength={7} pattern="#[0-9A-Fa-f]{6}" onChange={e=>onChange(e.target.value)}/></div></label>;
+}
+
+function LoginUIPreview({theme}:{theme:LoginUISettings}){
+  const style={
+    backgroundColor:theme.background_color,
+    backgroundImage:theme.background_image_url?`linear-gradient(rgba(4,8,18,.38),rgba(4,8,18,.38)),url("${theme.background_image_url}")`:undefined,
+    color:theme.text_color,
+  };
+  const card={
+    backgroundColor:theme.card_color,
+    borderColor:theme.border_color,
+    borderRadius:theme.card_radius,
+    width:`min(${theme.card_width}px, calc(100% - 2rem))`,
+    color:theme.text_color,
+    "--login-primary":theme.primary_color,
+    "--login-input":theme.input_background_color,
+    "--login-border":theme.border_color,
+    "--login-text":theme.text_color,
+    "--login-muted":theme.muted_text_color,
+  } as React.CSSProperties;
+  return <div className="loginPreview" style={style}><div className="loginPreviewCard loginCustomCard" style={card}>
+    {theme.logo_url&&<img className="loginLogo" src={theme.logo_url} alt=""/>}
+    {theme.show_brand_name&&<div className="loginBrand">{theme.brand_name}</div>}
+    <h1>{theme.heading}</h1>
+    {theme.subheading&&<p className="loginSubtitle">{theme.subheading}</p>}
+    {theme.notice_text&&<div className="loginNotice">{theme.notice_text}</div>}
+    <label><span>Username or email</span><input disabled value="preview@example.com" readOnly/></label>
+    <label><span>Password</span><input disabled type="password" value="password" readOnly/></label>
+    <button type="button">Sign in</button>
+    {theme.show_footer&&theme.footer_text&&<footer className="loginFooter">{theme.footer_text}</footer>}
+  </div></div>;
 }
 
 function Dashboard({data,loading}:{data:Item;loading:boolean}){
@@ -542,8 +728,8 @@ function CheckField({name,label,checked}:{name:string;label:string;checked:boole
 function ErrorBox({text}:{text:string}){return <div className="error" role="alert">{text}</div>}
 function Centered({children}:{children:React.ReactNode}){return <div className="centered">{children}</div>}
 function render(v:unknown){if(Array.isArray(v))return v.join(", ");if(typeof v==="boolean")return v?"Yes":"No";if(v==null||v==="")return "—";return String(v)}
-function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile",mfa:"MFA"})[v]}
-function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials",mfa:"Authenticator, passkeys, security keys and recovery codes"})[v]}
+function label(v:View){return ({dashboard:"Dashboard",users:"Users",groups:"Groups",roles:"Roles & RBAC",applications:"Applications",sessions:"Sessions",security:"Security policy",audit:"Audit log","login-ui":"Login UI","my-apps":"My applications","my-sessions":"My sessions",profile:"My profile",mfa:"MFA"})[v]}
+function subtitle(v:View){return ({dashboard:"System overview",users:"Local identities",groups:"Group directory",roles:"Assign administrative roles",applications:"OIDC and SAML applications and assignments",sessions:"Active browser sessions",security:"Password, lockout and session policy",audit:"Security and administrative events","login-ui":"Branding and appearance of the sign-in experience","my-apps":"Applications assigned directly or through your groups","my-sessions":"Manage your active OpenSSO sessions",profile:"Self-service profile and credentials",mfa:"Authenticator, passkeys, security keys and recovery codes"})[v]}
 function columns(v:View){return ({
   users:["id","username","email","display_name","active","must_change_password","locked_until","created_at"],
   groups:["id","name","description","created_at"],
