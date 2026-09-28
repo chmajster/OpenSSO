@@ -156,7 +156,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 		if !strings.HasPrefix(r.URL.Path, "/health/") {
 			expected, err := url.Parse(s.cfg.PublicURL)
 			if err != nil || expected.Host == "" {
