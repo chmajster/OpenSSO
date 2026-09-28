@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 		m.Handle("/saml/", s.saml.Handler())
 	}
 	m.HandleFunc("GET /api/v1/setup/status", s.setupStatus)
+	m.HandleFunc("GET /api/v1/public/login-ui", s.publicLoginUI)
 	m.HandleFunc("POST /api/v1/setup/bootstrap", s.bootstrap)
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
 	m.HandleFunc("POST /api/v1/auth/logout", s.withPrincipalRaw(s.logout))
@@ -130,6 +131,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/sessions/revoke-all", s.require("sessions.write", s.revokeAllSessions))
 	m.HandleFunc("GET /api/v1/security/policy", s.require("policies.read", s.securityPolicy))
 	m.HandleFunc("PUT /api/v1/security/policy", s.require("policies.write", s.updateSecurityPolicy))
+	m.HandleFunc("GET /api/v1/branding/login-ui", s.require("branding.read", s.adminLoginUI))
+	m.HandleFunc("PUT /api/v1/branding/login-ui", s.require("branding.write", s.updateLoginUI))
+	m.HandleFunc("POST /api/v1/branding/login-ui/reset", s.require("branding.write", s.resetLoginUI))
 	m.HandleFunc("GET /api/v1/signing-keys", s.require("signing_keys.read", s.listSigningKeys))
 	m.HandleFunc("POST /api/v1/signing-keys/rotate", s.require("signing_keys.rotate", s.rotateSigningKey))
 	m.HandleFunc("POST /api/v1/saml/applications", s.require("saml.write", s.createSAMLApplication))
