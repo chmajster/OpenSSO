@@ -195,7 +195,7 @@ export default function App(){
        view==="audit"?<AuditView/>:
        view==="my-apps"?<MyApplications items={items} loading={loading}/>:
        view==="my-sessions"?<MySessions items={items} loading={loading} reload={reload}/>:
-       view==="login-ui"?<LoginUIEditor/>:
+       view==="login-ui"?<LoginUIEditor canWrite={hasPermission(access,"branding.write")}/>:
        <ResourceView view={view} items={items} loading={loading} reload={reload} access={access} canMFARead={hasPermission(access,"mfa.read")} canMFAWrite={hasPermission(access,"mfa.write")}/>}
     </main>
   </div>;
@@ -264,7 +264,7 @@ function Login({onDone}:{onDone:()=>Promise<void>}){
   } as React.CSSProperties;
   return <div className="loginScreen" style={screenStyle}>
     <section className="card auth loginCustomCard" style={cardStyle}>
-      {theme.logo_url&&<img className="loginLogo" src={theme.logo_url} alt=""/>}
+      {theme.logo_url&&<img className="loginLogo" src={theme.logo_url} alt={theme.brand_name}/>}
       {theme.show_brand_name&&<div className="loginBrand">{theme.brand_name}</div>}
       <h1>{theme.heading}</h1>
       {theme.subheading&&<p className="loginSubtitle">{theme.subheading}</p>}
@@ -289,7 +289,7 @@ function ChangePassword({onDone}:{onDone:()=>Promise<void>}){
   return <Centered><section className="card auth"><h1>Password change required</h1><p>Your administrator requires a new password before normal access is granted.</p>{error&&<ErrorBox text={error}/>}<form onSubmit={submit}><Field name="current_password" label="Current password" type="password"/><Field name="new_password" label="New password" type="password" minLength={12}/><button disabled={busy}>{busy?"Changing…":"Change password"}</button></form></section></Centered>
 }
 
-function LoginUIEditor(){
+function LoginUIEditor({canWrite}:{canWrite:boolean}){
   const [theme,setTheme]=useState<LoginUISettings|null>(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
@@ -305,7 +305,7 @@ function LoginUIEditor(){
   const patch=(next:Partial<LoginUISettings>)=>setTheme(current=>current?{...current,...next}:current);
   const save=async(e:FormEvent<HTMLFormElement>)=>{
     e.preventDefault();
-    if(!theme)return;
+    if(!theme||!canWrite)return;
     setBusy(true);setError("");setDone("");
     try{
       const saved=await api("/api/v1/branding/login-ui",{method:"PUT",body:JSON.stringify(theme)});
@@ -314,6 +314,7 @@ function LoginUIEditor(){
     }catch(x){setError((x as Error).message)}finally{setBusy(false)}
   };
   const reset=async()=>{
+    if(!canWrite)return;
     if(!window.confirm("Reset the login UI to the OpenSSO defaults?"))return;
     setBusy(true);setError("");setDone("");
     try{
@@ -330,7 +331,9 @@ function LoginUIEditor(){
       <p className="muted">Configure a safe branded sign-in page without injecting custom HTML or JavaScript.</p>
       {error&&<ErrorBox text={error}/>}
       {done&&<div className="success">{done}</div>}
-      <form className="loginUiForm" onSubmit={save}>
+      {!canWrite&&<div className="readOnlyNotice">Read-only access. The current login UI can be inspected but not modified.</div>}
+      <form onSubmit={save}>
+        <fieldset className="loginUiForm" disabled={!canWrite||busy}>
         <label className="check policyCheck"><input type="checkbox" checked={theme.enabled} onChange={e=>patch({enabled:e.target.checked})}/><span>Enable custom login UI</span></label>
         <label className="check policyCheck"><input type="checkbox" checked={theme.show_brand_name} onChange={e=>patch({show_brand_name:e.target.checked})}/><span>Show brand name</span></label>
         <label className="check policyCheck"><input type="checkbox" checked={theme.show_footer} onChange={e=>patch({show_footer:e.target.checked})}/><span>Show footer</span></label>
@@ -350,7 +353,8 @@ function LoginUIEditor(){
         <ThemeColor label="Border" value={theme.border_color} onChange={value=>patch({border_color:value})}/>
         <label><span>Card width (px)</span><input type="number" min={320} max={720} value={theme.card_width} onChange={e=>patch({card_width:Number(e.target.value)})}/></label>
         <label><span>Card radius (px)</span><input type="number" min={0} max={48} value={theme.card_radius} onChange={e=>patch({card_radius:Number(e.target.value)})}/></label>
-        <div className="actions wide"><button disabled={busy}>{busy?"Saving…":"Save login UI"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>void reset()}>Reset defaults</button></div>
+        {canWrite&&<div className="actions wide"><button disabled={busy}>{busy?"Saving…":"Save login UI"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>void reset()}>Reset defaults</button></div>}
+        </fieldset>
       </form>
     </section>
     <section className="card loginPreviewPanel">
@@ -383,7 +387,7 @@ function LoginUIPreview({theme}:{theme:LoginUISettings}){
     "--login-muted":theme.muted_text_color,
   } as React.CSSProperties;
   return <div className="loginPreview" style={style}><div className="loginPreviewCard loginCustomCard" style={card}>
-    {theme.logo_url&&<img className="loginLogo" src={theme.logo_url} alt=""/>}
+    {theme.logo_url&&<img className="loginLogo" src={theme.logo_url} alt={theme.brand_name}/>}
     {theme.show_brand_name&&<div className="loginBrand">{theme.brand_name}</div>}
     <h1>{theme.heading}</h1>
     {theme.subheading&&<p className="loginSubtitle">{theme.subheading}</p>}
