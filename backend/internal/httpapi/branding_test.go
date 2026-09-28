@@ -39,3 +39,12 @@ func TestNormalizeLoginUIAllowsRootRelativeMedia(t *testing.T) {
 		t.Fatalf("expected root-relative media URL to be accepted: %v", err)
 	}
 }
+
+
+func TestNormalizeLoginUIRejectsMalformedRootRelativeMedia(t *testing.T) {
+	in := defaultLoginUISettings()
+	in.LogoURL = "/logo.svg\");background-image:url(https://example.test/x)"
+	if _, err := normalizeLoginUISettings(in); err == nil {
+		t.Fatal("expected malformed root-relative media URL to be rejected")
+	}
+}
