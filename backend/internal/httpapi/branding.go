@@ -99,13 +99,13 @@ func normalizeLoginUISettings(in loginUISettings) (loginUISettings, error) {
 		return in, fmt.Errorf("login UI media URL exceeds 2048 bytes")
 	}
 	for name, value := range map[string]string{
-		"background_color": in.BackgroundColor,
-		"card_color": in.CardColor,
-		"text_color": in.TextColor,
-		"muted_text_color": in.MutedTextColor,
-		"primary_color": in.PrimaryColor,
+		"background_color":       in.BackgroundColor,
+		"card_color":             in.CardColor,
+		"text_color":             in.TextColor,
+		"muted_text_color":       in.MutedTextColor,
+		"primary_color":          in.PrimaryColor,
 		"input_background_color": in.InputBackgroundColor,
-		"border_color": in.BorderColor,
+		"border_color":           in.BorderColor,
 	} {
 		if !loginUIColorPattern.MatchString(value) {
 			return in, fmt.Errorf("%s must be a six-digit hexadecimal color", name)
