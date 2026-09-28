@@ -742,5 +742,5 @@ function columns(v:View){return ({
   applications:["id","name","protocol","client_id","entity_id","enabled","initiate_login_uri","created_at"],
   sessions:["id","username","ip","user_agent","last_seen_at","expires_at"],
   audit:["occurred_at","event","result","target_type","target_id","actor_user_id","ip"],
-  dashboard:[],security:[],profile:[],mfa:[],"my-apps":[],"my-sessions":[]
+  dashboard:[],security:[],profile:[],mfa:[],"login-ui":[],"my-apps":[],"my-sessions":[]
 })[v]||[]}
