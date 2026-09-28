@@ -124,6 +124,9 @@ func validateLoginUIMediaURL(raw string) error {
 	if raw == "" {
 		return nil
 	}
+	if strings.ContainsAny(raw, "\"'\\\r\n\t") {
+		return fmt.Errorf("contains characters unsafe for a CSS/image URL")
+	}
 	u, err := url.ParseRequestURI(raw)
 	if err != nil || u.Fragment != "" || u.User != nil {
 		return fmt.Errorf("must be an absolute http(s) URL or a root-relative path")
