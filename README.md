@@ -14,6 +14,7 @@ Identity and administration:
 - per-user, per-session and global browser-session revocation;
 - immutable-style audit events for authentication and administrative mutations;
 - permission-aware administration UI with search and pagination;
+- centrally managed Custom Login UI with branding, colors, logo/background, live preview, RBAC and audited changes;
 - self-service User Portal for assigned applications, profile, password and own sessions.
 
 OIDC/OAuth:
@@ -139,7 +140,7 @@ docker compose up -d --build
 bash scripts/e2e-foundation.sh
 ```
 
-The E2E flow covers fresh installation, IAM administration, User Portal, OIDC Authorization Code + PKCE, refresh-token rotation/reuse detection, Client Credentials, introspection, revocation and logout.
+The E2E flow covers fresh installation, IAM administration, Custom Login UI persistence/reset, User Portal, OIDC Authorization Code + PKCE, refresh-token rotation/reuse detection, Client Credentials, introspection, revocation and logout.
 
 ## Health
 
@@ -151,6 +152,7 @@ The E2E flow covers fresh installation, IAM administration, User Portal, OIDC Au
 - `docs/architecture.md`: components, data model and scaling model.
 - `docs/security.md`: security controls and threat mitigations.
 - `docs/oidc.md`: OIDC/OAuth integration behavior.
+- `docs/login-ui.md`: Custom Login UI administration and security model.
 - `docs/openapi.yaml`: administrative/self-service HTTP API.
 - `docs/deployment.md`: deployment requirements.
 - `docs/development.md`: development and verification commands.

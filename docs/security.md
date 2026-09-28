@@ -73,6 +73,8 @@ The HTTP layer applies:
 
 Database statements are parameterized. Secrets are excluded from audit metadata and normal logs.
 
+Custom Login UI accepts only structured, server-validated design tokens and text. It does not accept custom HTML, JavaScript or raw CSS. Branding media URLs are length-limited, restricted to root-relative or HTTP(S) URLs, and reject quote, backslash and control delimiters that could escape a CSS URL context. The browser policy keeps scripts restricted to the OpenSSO origin while allowing validated inline style properties and configured login images.
+
 ## Audit
 
 Authentication and administrative mutations record actor, target, event, result, source IP, user agent and request ID. Forwarded client IP headers are accepted only when `OPENSSO_TRUST_PROXY_HEADERS=true`; the reference nginx-only API deployment enables this explicitly. Passwords, bearer tokens, refresh tokens, client secrets and private signing keys are not audit fields.

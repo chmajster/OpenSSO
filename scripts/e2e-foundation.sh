@@ -126,6 +126,25 @@ api_mutate POST "/api/v1/users/$USER_ID/sessions/revoke-all" >/dev/null
 POLICY="$(curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/v1/security/policy")"
 python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["password_min_length"] >= 12; assert d["password_require_upper"] is True; assert d["password_require_lower"] is True; assert d["password_require_digit"] is True; assert d["password_require_symbol"] is True; assert d["lockout_threshold"] >= 3' <<<"$POLICY"
 
+DEFAULT_LOGIN_UI="$(curl -fsS "$BASE_URL/api/v1/public/login-ui")"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["enabled"] is False; assert d["brand_name"]=="OpenSSO"; assert d["heading"]=="Sign in"' "$DEFAULT_LOGIN_UI"
+
+CUSTOM_LOGIN_UI='{"enabled":true,"brand_name":"E2E OpenSSO","heading":"Welcome","subheading":"Integration test login","logo_url":"/branding/e2e-logo.svg","background_image_url":"https://example.test/background.webp","background_color":"#101828","card_color":"#1d2939","text_color":"#f9fafb","muted_text_color":"#d0d5dd","primary_color":"#7f56d9","input_background_color":"#101828","border_color":"#475467","card_radius":20,"card_width":520,"notice_text":"Authorized users only","footer_text":"E2E footer","show_brand_name":true,"show_footer":true}'
+api_mutate PUT /api/v1/branding/login-ui --data "$CUSTOM_LOGIN_UI" >/dev/null
+
+ADMIN_LOGIN_UI="$(curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/v1/branding/login-ui")"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["enabled"] is True; assert d["brand_name"]=="E2E OpenSSO"; assert d["primary_color"]=="#7f56d9"; assert d["card_width"]==520' "$ADMIN_LOGIN_UI"
+
+PUBLIC_LOGIN_UI="$(curl -fsS "$BASE_URL/api/v1/public/login-ui")"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["enabled"] is True; assert d["heading"]=="Welcome"; assert d["notice_text"]=="Authorized users only"; assert d["show_footer"] is True' "$PUBLIC_LOGIN_UI"
+
+api_mutate POST /api/v1/branding/login-ui/reset >/dev/null
+RESET_LOGIN_UI="$(curl -fsS "$BASE_URL/api/v1/public/login-ui")"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["enabled"] is False; assert d["brand_name"]=="OpenSSO"; assert d["logo_url"]==""; assert d["show_footer"] is False' "$RESET_LOGIN_UI"
+
+curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/v1/audit" |
+  python3 -c 'import json,sys; d=json.load(sys.stdin); events={x["event"] for x in d["items"]}; assert "LOGIN_UI_UPDATED" in events; assert "LOGIN_UI_RESET" in events'
+
 
 USER_LOGIN="$(curl -fsS -c "$USER_COOKIE_JAR" -X POST "$BASE_URL/api/v1/auth/login" \
   -H "Content-Type: application/json" \
