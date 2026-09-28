@@ -522,132 +522,13 @@ components:
         subheading: { type: string, maxLength: 240 }
         logo_url: { type: string, description: Absolute http(s) URL or root-relative path }
         background_image_url: { type: string, description: Absolute http(s) URL or root-relative path }
-        background_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
-      name: id
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-  securitySchemes:
-    sessionCookie:
-      type: apiKey
-      in: cookie
-      name: opensso_session
-    csrfHeader:
-      type: apiKey
-      in: header
-      name: X-CSRF-Token
-    bootstrapToken:
-      type: http
-      scheme: bearer
- }
-        card_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
-      name: id
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-  securitySchemes:
-    sessionCookie:
-      type: apiKey
-      in: cookie
-      name: opensso_session
-    csrfHeader:
-      type: apiKey
-      in: header
-      name: X-CSRF-Token
-    bootstrapToken:
-      type: http
-      scheme: bearer
- }
-        text_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
-      name: id
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-  securitySchemes:
-    sessionCookie:
-      type: apiKey
-      in: cookie
-      name: opensso_session
-    csrfHeader:
-      type: apiKey
-      in: header
-      name: X-CSRF-Token
-    bootstrapToken:
-      type: http
-      scheme: bearer
- }
-        muted_text_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
-      name: id
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-  securitySchemes:
-    sessionCookie:
-      type: apiKey
-      in: cookie
-      name: opensso_session
-    csrfHeader:
-      type: apiKey
-      in: header
-      name: X-CSRF-Token
-    bootstrapToken:
-      type: http
-      scheme: bearer
- }
-        primary_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
-      name: id
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-  securitySchemes:
-    sessionCookie:
-      type: apiKey
-      in: cookie
-      name: opensso_session
-    csrfHeader:
-      type: apiKey
-      in: header
-      name: X-CSRF-Token
-    bootstrapToken:
-      type: http
-      scheme: bearer
- }
-        input_background_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
-      name: id
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-  securitySchemes:
-    sessionCookie:
-      type: apiKey
-      in: cookie
-      name: opensso_session
-    csrfHeader:
-      type: apiKey
-      in: header
-      name: X-CSRF-Token
-    bootstrapToken:
-      type: http
-      scheme: bearer
- }
-        border_color: { type: string, pattern: '^#[0-9A-Fa-f]{6}    Id:
-      name: id
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-  securitySchemes:
-    sessionCookie:
-      type: apiKey
-      in: cookie
-      name: opensso_session
-    csrfHeader:
-      type: apiKey
-      in: header
-      name: X-CSRF-Token
-    bootstrapToken:
-      type: http
-      scheme: bearer
- }
+        background_color: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+        card_color: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+        text_color: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+        muted_text_color: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+        primary_color: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+        input_background_color: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+        border_color: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
         card_radius: { type: integer, minimum: 0, maximum: 48 }
         card_width: { type: integer, minimum: 320, maximum: 720 }
         notice_text: { type: string, maxLength: 500 }
